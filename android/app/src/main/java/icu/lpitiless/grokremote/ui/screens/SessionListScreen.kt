@@ -49,7 +49,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,7 +66,9 @@ import java.util.Date
 @Composable
 internal fun SessionListScreen(state: ChatUiState, viewModel: ChatViewModel) {
     var showNew by remember { mutableStateOf(false) }
-    var cwd by remember(state.defaultCwd) { mutableStateOf(state.defaultCwd) }
+    var cwd by remember(state.defaultCwd) {
+        mutableStateOf(TextFieldValue(state.defaultCwd, TextRange(state.defaultCwd.length)))
+    }
     var menu by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
@@ -86,7 +90,12 @@ internal fun SessionListScreen(state: ChatUiState, viewModel: ChatViewModel) {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showNew = true }) { Icon(Icons.Default.Add, "新建会话") }
+            FloatingActionButton(
+                onClick = {
+                    cwd = cwd.copy(selection = TextRange(cwd.text.length))
+                    showNew = true
+                },
+            ) { Icon(Icons.Default.Add, "新建会话") }
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
@@ -120,9 +129,21 @@ internal fun SessionListScreen(state: ChatUiState, viewModel: ChatViewModel) {
         AlertDialog(
             onDismissRequest = { showNew = false },
             title = { Text("新建会话") },
-            text = { OutlinedTextField(cwd, { cwd = it }, label = { Text("工作目录") }, singleLine = true) },
+            text = {
+                OutlinedTextField(
+                    value = cwd,
+                    onValueChange = { cwd = it },
+                    label = { Text("工作目录") },
+                    minLines = 2,
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
             confirmButton = {
-                TextButton(onClick = { showNew = false; viewModel.createSession(cwd) }, enabled = cwd.isNotBlank()) { Text("创建") }
+                TextButton(
+                    onClick = { showNew = false; viewModel.createSession(cwd.text) },
+                    enabled = cwd.text.isNotBlank(),
+                ) { Text("创建") }
             },
             dismissButton = { TextButton(onClick = { showNew = false }) { Text("取消") } },
         )
