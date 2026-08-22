@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
@@ -11,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +25,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -71,6 +76,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -82,6 +88,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -91,15 +98,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -114,8 +124,11 @@ import icu.lpitiless.grokremote.model.ToolRunState
 import icu.lpitiless.grokremote.ui.ChatUiState
 import icu.lpitiless.grokremote.ui.ChatViewModel
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -123,6 +136,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         handlePairingIntent(intent)
         setContent {
             GrokRemoteTheme {
@@ -152,14 +166,35 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun GrokRemoteTheme(content: @Composable () -> Unit) {
     val colors = darkColorScheme(
-        primary = Color(0xFF67E8F9),
-        onPrimary = Color(0xFF071014),
+        primary = Color(0xFFF1F1F2),
+        onPrimary = Color(0xFF101114),
+        primaryContainer = Color(0xFF24252A),
+        onPrimaryContainer = Color(0xFFEDEDEF),
+        secondary = Color(0xFFC7C8CC),
+        onSecondary = Color(0xFF101114),
+        secondaryContainer = Color(0xFF24252A),
+        onSecondaryContainer = Color(0xFFEDEDEF),
+        tertiary = Color(0xFFC7C8CC),
+        onTertiary = Color(0xFF101114),
+        tertiaryContainer = Color(0xFF24252A),
+        onTertiaryContainer = Color(0xFFEDEDEF),
         background = Color(0xFF090A0C),
-        surface = Color(0xFF111317),
-        surfaceVariant = Color(0xFF1A1D22),
-        outline = Color(0xFF353A43),
+        onBackground = Color(0xFFEDEDEF),
+        surface = Color(0xFF0E0F12),
+        onSurface = Color(0xFFEDEDEF),
+        surfaceVariant = Color(0xFF1B1C20),
+        onSurfaceVariant = Color(0xFF9B9DA4),
+        outline = Color(0xFF303238),
     )
-    MaterialTheme(colorScheme = colors) {
+    val type = Typography(
+        bodyLarge = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.5.sp, lineHeight = 23.sp),
+        bodyMedium = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.5.sp, lineHeight = 21.sp),
+        bodySmall = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp, lineHeight = 18.sp),
+        titleMedium = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp, lineHeight = 21.sp),
+        titleSmall = MaterialTheme.typography.titleSmall.copy(fontSize = 14.5.sp, lineHeight = 19.sp),
+        labelSmall = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, lineHeight = 14.sp),
+    )
+    MaterialTheme(colorScheme = colors, typography = type) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
@@ -350,9 +385,40 @@ private fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     var effortMenu by remember { mutableStateOf(false) }
     val activeTool = state.blocks.lastOrNull { it.kind == ChatBlockKind.TOOL && it.toolState in setOf(ToolRunState.PENDING, ToolRunState.RUNNING) }
     val farFromBottom by remember { derivedStateOf { listState.canScrollForward } }
+    val lastBlock = state.blocks.lastOrNull()
+    val scrollRevision = remember(state.blocks.size, lastBlock) {
+        "${state.blocks.size}:${lastBlock?.id}:${lastBlock?.text?.length}:${lastBlock?.detail?.length}:${lastBlock?.toolState}"
+    }
 
-    LaunchedEffect(state.blocks) {
-        if (follow && state.blocks.isNotEmpty()) listState.animateScrollToItem(state.blocks.lastIndex)
+    LaunchedEffect(scrollRevision, follow) {
+        if (!follow || state.blocks.isEmpty()) return@LaunchedEffect
+        listState.scrollToItem(state.blocks.size)
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val last = layout.visibleItemsInfo.lastOrNull()
+            listOf(
+                layout.totalItemsCount,
+                layout.viewportEndOffset,
+                last?.index ?: -1,
+                last?.offset ?: 0,
+                last?.size ?: 0,
+            )
+        }.distinctUntilChanged().collect {
+            if (follow && listState.canScrollForward) {
+                listState.scrollToItem(state.blocks.size)
+            }
+        }
+    }
+
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is DragInteraction.Start -> follow = false
+                is DragInteraction.Stop, is DragInteraction.Cancel -> {
+                    if (!listState.canScrollForward) follow = true
+                }
+            }
+        }
     }
 
     Scaffold(
@@ -361,13 +427,35 @@ private fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 navigationIcon = { IconButton(onClick = viewModel::closeSession) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 title = {
                     Column {
-                        Text(session.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                        Text(state.model.currentModelId, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            session.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(5.dp).clip(CircleShape).background(Color(0xFF69C48A)))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                state.model.currentModelId,
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 },
                 actions = {
                     Box {
-                        TextButton(onClick = { effortMenu = true }) { Text(state.model.effort.uppercase(), fontWeight = FontWeight.Bold) }
+                        TextButton(onClick = { effortMenu = true }) {
+                            Text(
+                                state.model.effort.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         DropdownMenu(expanded = effortMenu, onDismissRequest = { effortMenu = false }) {
                             state.model.effortLevels.forEach { effort ->
                                 DropdownMenuItem(
@@ -379,10 +467,11 @@ private fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                         }
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
         bottomBar = {
-            Column(Modifier.imePadding()) {
+            Column(Modifier.imePadding().navigationBarsPadding()) {
                 activeTool?.let { FloatingToolStatus(it, viewModel::cancel) }
                 Composer(
                     text = draft,
@@ -408,14 +497,19 @@ private fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(state.blocks, key = { it.id }) { block -> ChatBlockItem(block, viewModel) }
+                item(key = "chat-bottom") { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
             }
             if (farFromBottom) {
                 FilledIconButton(
                     onClick = {
                         follow = true
-                        if (state.blocks.isNotEmpty()) scope.launch { listState.animateScrollToItem(state.blocks.lastIndex) }
+                        if (state.blocks.isNotEmpty()) scope.launch { listState.scrollToItem(state.blocks.size) }
                     },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp).size(42.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp).size(38.dp),
                 ) { Icon(Icons.Default.ArrowDownward, "滚动到底部") }
             }
         }
@@ -431,27 +525,89 @@ private fun Composer(
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
-    Surface(tonalElevation = 4.dp) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-            if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                IconButton(onClick = { }, enabled = false) {
-                    Icon(Icons.Default.Add, null, modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, CircleShape).padding(7.dp))
+    Surface(color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Surface(
+                color = Color(0xFF191A1E),
+                shape = RoundedCornerShape(20.dp),
+                shadowElevation = 5.dp,
+            ) {
+                Column(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp)) {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = onTextChange,
+                        minLines = 1,
+                        maxLines = 7,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 34.dp, max = 148.dp),
+                        decorationBox = { innerTextField ->
+                            Box(
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                if (text.isBlank()) {
+                                    Text(
+                                        "给 Grok 发送消息",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        },
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(34.dp),
+                            shape = CircleShape,
+                            color = Color(0xFF24252A),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "添加附件",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(19.dp),
+                                )
+                            }
+                        }
+
+                        val showStatus = busy || status.contains("失败") || status.contains("重连")
+                        if (showStatus && status.isNotBlank()) {
+                            Text(
+                                status,
+                                modifier = Modifier.padding(start = 10.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        FilledIconButton(
+                            onClick = if (busy) onStop else onSend,
+                            enabled = busy || text.isNotBlank(),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.onSurface,
+                                contentColor = MaterialTheme.colorScheme.background,
+                                disabledContainerColor = Color(0xFF303137),
+                                disabledContentColor = Color(0xFF777981),
+                            ),
+                            modifier = Modifier.size(34.dp),
+                        ) {
+                            Icon(
+                                if (busy) Icons.Default.Stop else Icons.Default.ArrowUpward,
+                                if (busy) "停止" else "发送",
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
                 }
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    placeholder = { Text("给 Grok 发送消息") },
-                    minLines = 1,
-                    maxLines = 7,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(20.dp),
-                )
-                FilledIconButton(
-                    onClick = if (busy) onStop else onSend,
-                    enabled = busy || text.isNotBlank(),
-                ) { Icon(if (busy) Icons.Default.Stop else Icons.Default.ArrowUpward, if (busy) "停止" else "发送") }
             }
         }
     }
@@ -494,9 +650,9 @@ private fun UserMessage(block: ChatBlock) {
         Box {
             Text(
                 block.text,
-                fontSize = 16.5.sp,
-                modifier = Modifier.widthIn(max = 330.dp).clip(RoundedCornerShape(18.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.widthIn(max = 304.dp).clip(RoundedCornerShape(18.dp))
+                    .background(Color(0xFF1D1E22))
                     .combinedClickable(onClick = { }, onLongClick = { menu = true })
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             )
@@ -509,15 +665,59 @@ private fun UserMessage(block: ChatBlock) {
 
 @Composable
 private fun AssistantMessage(block: ChatBlock) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    val body = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface)
+    val code = MaterialTheme.typography.bodySmall.copy(
+        color = Color(0xFFD6D7DA),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 12.5.sp,
+        lineHeight = 18.sp,
+    )
+    val inlineCode = body.copy(
+        color = Color(0xFFD6D7DA),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.5.sp,
+    )
+    val markdownType = markdownTypography(
+        h1 = MaterialTheme.typography.titleLarge.copy(fontSize = 21.sp, lineHeight = 27.sp),
+        h2 = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, lineHeight = 24.sp),
+        h3 = MaterialTheme.typography.titleSmall.copy(fontSize = 16.sp, lineHeight = 22.sp),
+        h4 = body.copy(fontWeight = FontWeight.SemiBold),
+        h5 = body.copy(fontWeight = FontWeight.SemiBold),
+        h6 = body.copy(fontWeight = FontWeight.SemiBold),
+        text = body,
+        code = code,
+        inlineCode = inlineCode,
+        quote = body.copy(color = MaterialTheme.colorScheme.onSurfaceVariant, fontStyle = FontStyle.Italic),
+        paragraph = body,
+        ordered = body,
+        bullet = body,
+        list = body,
+        link = body,
+        table = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
+    )
+    val markdownColors = markdownColor(
+        text = MaterialTheme.colorScheme.onSurface,
+        codeText = Color(0xFFD6D7DA),
+        inlineCodeText = Color(0xFFD6D7DA),
+        linkText = Color(0xFFB8C7EA),
+        codeBackground = Color(0xFF141519),
+        inlineCodeBackground = Color(0xFF202126),
+        dividerColor = MaterialTheme.colorScheme.outline,
+        tableText = MaterialTheme.colorScheme.onSurface,
+        tableBackground = Color(0xFF121317),
+    )
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.AutoAwesome, null, tint = Color(0xFFB8B49F), modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Grok", fontWeight = FontWeight.SemiBold)
+            Text("Grok", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(7.dp))
         Markdown(
             content = block.text,
+            colors = markdownColors,
+            typography = markdownType,
             modifier = Modifier.fillMaxWidth(),
         )
     }
