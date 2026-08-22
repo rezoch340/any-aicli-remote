@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "icu.lpitiless.grokremote"
+    namespace = "com.grokremote.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "icu.lpitiless.grokremote"
+        applicationId = "com.grokremote.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -55,6 +55,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("com.mikepenz:multiplatform-markdown-renderer-android:0.33.0")
-    implementation("com.mikepenz:multiplatform-markdown-renderer-m3-android:0.33.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-android:0.38.1")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3-android:0.38.1")
 }

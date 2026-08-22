@@ -17,6 +17,9 @@ final class ChatStore: ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     private var manuallyDisconnected = false
     private var activeProfile: ServerProfile?
+    private var activeTurnID: UUID?
+    private var pendingUserEcho: String?
+    private var pendingUserEchoOffset = 0
 
     init() {
         client.onNotification = { [weak self] object in self?.handleNotification(object) }
@@ -24,6 +27,30 @@ final class ChatStore: ObservableObject {
     }
 
     var hasSavedProfile: Bool { !address.isEmpty && !pairingKey.isEmpty }
+
+    func connect(pairingDeepLink: URL) async {
+        guard pairingDeepLink.scheme?.lowercased() == "grokremote",
+              pairingDeepLink.host?.lowercased() == "pair",
+              let components = URLComponents(url: pairingDeepLink, resolvingAgainstBaseURL: false) else {
+            connection = .failed("无法识别配对二维码")
+            return
+        }
+        let queryItems = components.queryItems ?? []
+        guard let serviceAddress = queryItems.first(where: { $0.name == "url" })?.value,
+              !serviceAddress.isEmpty else {
+            connection = .failed("配对二维码缺少服务地址")
+            return
+        }
+        address = serviceAddress
+        if let key = queryItems.first(where: { $0.name == "key" })?.value, !key.isEmpty {
+            pairingKey = key
+        }
+        if let workingDirectory = queryItems.first(where: { $0.name == "cwd" })?.value,
+           !workingDirectory.isEmpty {
+            defaultCwd = workingDirectory
+        }
+        await connect()
+    }
 
     func connect(isReconnect: Bool = false) async {
         manuallyDisconnected = false
@@ -54,6 +81,7 @@ final class ChatStore: ObservableObject {
     func disconnect() {
         manuallyDisconnected = true
         reconnectTask?.cancel()
+        resetTurnTracking()
         client.disconnect(notify: false)
         connection = .disconnected
     }
@@ -68,6 +96,7 @@ final class ChatStore: ObservableObject {
     }
 
     func openSession(_ session: SessionSummary) async {
+        resetTurnTracking()
         selectedSession = session
         blocks = []
         isBusy = false
@@ -109,7 +138,10 @@ final class ChatStore: ObservableObject {
             }
             let session = SessionSummary(json: ["sessionId": id, "title": "新会话", "cwd": cwd, "resident": true])
             try? await refreshSessions()
-            if let session { selectedSession = session }
+            if let session {
+                resetTurnTracking()
+                selectedSession = session
+            }
             return session
         } catch {
             statusMessage = error.localizedDescription
@@ -121,6 +153,10 @@ final class ChatStore: ObservableObject {
         guard let session = selectedSession else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let turnID = UUID()
+        activeTurnID = turnID
+        pendingUserEcho = trimmed
+        pendingUserEchoOffset = 0
         blocks.append(ChatBlock(id: UUID().uuidString, kind: .user, text: trimmed))
         isBusy = true
         statusMessage = "等待 Grok"
@@ -130,8 +166,20 @@ final class ChatStore: ObservableObject {
                     "sessionId": session.id,
                     "prompt": [["type": "text", "text": trimmed]]
                 ])
+                guard activeTurnID == turnID else { return }
+                activeTurnID = nil
+                isBusy = false
+                statusMessage = "完成"
             } catch {
-                guard !error.localizedDescription.lowercased().contains("cancel") else { return }
+                guard activeTurnID == turnID else { return }
+                activeTurnID = nil
+                pendingUserEcho = nil
+                pendingUserEchoOffset = 0
+                guard !error.localizedDescription.lowercased().contains("cancel") else {
+                    isBusy = false
+                    statusMessage = "已停止"
+                    return
+                }
                 blocks.append(ChatBlock(id: UUID().uuidString, kind: .system, text: error.localizedDescription))
                 isBusy = false
                 statusMessage = "发送失败"
@@ -141,6 +189,7 @@ final class ChatStore: ObservableObject {
 
     func cancel() {
         guard let session = selectedSession else { return }
+        resetTurnTracking()
         Task {
             try? await client.notify("session/cancel", params: ["sessionId": session.id])
             isBusy = false
@@ -241,7 +290,8 @@ final class ChatStore: ObservableObject {
         let type = update.string("sessionUpdate") ?? ""
         let text = update.object("content")?.string("text") ?? update.string("text") ?? ""
         switch type {
-        case "user_message_chunk": appendChunk(kind: .user, text: text)
+        case "user_message_chunk":
+            if !consumePendingUserEcho(text) { appendChunk(kind: .user, text: text) }
         case "agent_message_chunk":
             appendChunk(kind: .assistant, text: text)
             isBusy = true; statusMessage = "正在回复"
@@ -255,9 +305,36 @@ final class ChatStore: ObservableObject {
             appendChunk(kind: .plan, text: text.isEmpty ? String(describing: update["entries"] ?? "Plan") : text)
         case "session_recap": appendChunk(kind: .system, text: text)
         case "turn_completed", "task_completed":
+            activeTurnID = nil
             isBusy = false; statusMessage = "完成"
         default: break
         }
+    }
+
+    private func consumePendingUserEcho(_ chunk: String) -> Bool {
+        guard let expected = pendingUserEcho else { return false }
+        if chunk.isEmpty { return true }
+        let offset = min(max(pendingUserEchoOffset, 0), expected.count)
+        let boundary = expected.index(expected.startIndex, offsetBy: offset)
+        let remaining = String(expected[boundary...])
+        let nextOffset: Int
+        if chunk == expected {
+            nextOffset = expected.count
+        } else if remaining.hasPrefix(chunk) {
+            nextOffset = offset + chunk.count
+        } else if expected.hasPrefix(chunk) {
+            nextOffset = max(offset, chunk.count)
+        } else {
+            pendingUserEcho = nil
+            pendingUserEchoOffset = 0
+            return false
+        }
+        pendingUserEchoOffset = min(nextOffset, expected.count)
+        if pendingUserEchoOffset == expected.count {
+            pendingUserEcho = nil
+            pendingUserEchoOffset = 0
+        }
+        return true
     }
 
     private func appendChunk(kind: ChatBlockKind, text: String) {
@@ -272,16 +349,28 @@ final class ChatStore: ObservableObject {
 
     private func upsertTool(_ update: [String: Any]) {
         let id = update.string("toolCallId", "tool_call_id", "id") ?? UUID().uuidString
-        let title = update.string("title", "toolName", "kind") ?? "工具"
-        let status = ToolRunState(raw: update.string("status", "toolStatus"))
+        let title = update.string("title", "toolName", "kind")
+        let rawStatus = update.string("status", "toolStatus")
         let detail = update.string("content", "result") ?? update.object("content")?.string("text") ?? ""
         if let index = blocks.firstIndex(where: { $0.id == "tool-\(id)" }) {
-            blocks[index].title = title
-            blocks[index].toolState = status
+            if let title { blocks[index].title = title }
+            if rawStatus != nil { blocks[index].toolState = ToolRunState(raw: rawStatus) }
             if !detail.isEmpty { blocks[index].detail = detail }
         } else {
-            blocks.append(ChatBlock(id: "tool-\(id)", kind: .tool, title: title, detail: detail, toolState: status))
+            blocks.append(ChatBlock(
+                id: "tool-\(id)",
+                kind: .tool,
+                title: title ?? "工具",
+                detail: detail,
+                toolState: ToolRunState(raw: rawStatus)
+            ))
         }
+    }
+
+    private func resetTurnTracking() {
+        activeTurnID = nil
+        pendingUserEcho = nil
+        pendingUserEchoOffset = 0
     }
 
     private func ingestHistory(_ event: [String: Any]) {

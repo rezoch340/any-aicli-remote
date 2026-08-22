@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum KeychainStore {
-    private static let service = "icu.lpitiless.grokremote"
+    private static let service = "com.grokremote.app"
 
     static func save(_ value: String, account: String) {
         let data = Data(value.utf8)

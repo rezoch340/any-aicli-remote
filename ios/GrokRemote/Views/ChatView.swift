@@ -28,7 +28,8 @@ struct ChatView: View {
             })
             .onChange(of: store.blocks) { _, _ in
                 guard shouldFollow else { return }
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+                // Do not restart a scroll animation for every streamed chunk.
+                proxy.scrollTo("chat-bottom", anchor: .bottom)
             }
             .overlay(alignment: .bottomTrailing) {
                 if !shouldFollow {

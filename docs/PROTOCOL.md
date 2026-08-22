@@ -26,10 +26,16 @@
   "params": {
     "protocolVersion": 1,
     "clientInfo": { "name": "grok-remote-app", "version": "0.1.0" },
-    "clientCapabilities": {}
+    "clientCapabilities": {
+      "fs": { "readTextFile": true, "writeTextFile": true },
+      "terminal": true
+    }
   }
 }
 ```
+
+`fs` 与 `terminal` 不能省略。Grok Agent 会依据初始化能力决定是否向 Hub
+发送反向文件和终端 RPC；传空对象会让工具调用停在 `tool_call`。
 
 ### 会话
 

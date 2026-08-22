@@ -1,0 +1,30 @@
+name: Go backend quality
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "scripts/check-go-quality.sh"
+      - "scripts/naming-gate.go"
+      - ".github/workflows/go-backend-quality.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "scripts/check-go-quality.sh"
+      - "scripts/naming-gate.go"
+      - ".github/workflows/go-backend-quality.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: backend/go.sum
+      - name: Run mandatory quality gate
+        run: ./scripts/check-go-quality.sh

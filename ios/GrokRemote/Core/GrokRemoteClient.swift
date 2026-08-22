@@ -33,7 +33,10 @@ final class GrokRemoteClient {
         let raw = try await rpc("initialize", params: [
             "protocolVersion": 1,
             "clientInfo": ["name": "grok-remote-app-ios", "version": "0.1.0"],
-            "clientCapabilities": [:]
+            "clientCapabilities": [
+                "fs": ["readTextFile": true, "writeTextFile": true],
+                "terminal": true
+            ]
         ], timeout: 20)
         return raw as? [String: Any] ?? [:]
     }

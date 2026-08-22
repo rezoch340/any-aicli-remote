@@ -9,6 +9,9 @@ struct GrokRemoteApp: App {
             RootView()
                 .environmentObject(store)
                 .preferredColorScheme(.dark)
+                .onOpenURL { pairingDeepLink in
+                    Task { await store.connect(pairingDeepLink: pairingDeepLink) }
+                }
         }
     }
 }
