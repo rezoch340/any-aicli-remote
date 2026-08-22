@@ -1,0 +1,382 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03B59F5A72B97CBF4D3C1FB4 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40532733B5B8D6224FE3C291 /* ChatStore.swift */; };
+		7B2496CBB931838405FDB6F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9AACEF2B35F22E364DE3FCC4 /* Assets.xcassets */; };
+		861850556E42EA71BB265943 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF9F870E98665D4140012A68 /* Models.swift */; };
+		94739CE7954D55D916BD5AC8 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFEC3CC1513EBCCA758A714 /* PairingView.swift */; };
+		966CEB1504E29A0CCD4C41B2 /* GrokRemoteClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC4B4F2AD00880CB575254D /* GrokRemoteClient.swift */; };
+		97434DC4419F4FA4B008CCC0 /* GrokRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6050DE69E3A6D7D2420C256C /* GrokRemoteApp.swift */; };
+		ADC7203018A25E96721EDADB /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26194C127900A1E23DB75ECD /* ChatView.swift */; };
+		C5771B3E2AAC0032BD776955 /* ChatBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88BF528AA738F52C30ED4F1B /* ChatBlockView.swift */; };
+		CDBC377FDEA5C5302AEE54D0 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5DFB41EB7797C9245B4C0F5 /* RootView.swift */; };
+		D9A734968791A4A0A87D3081 /* SessionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97D363625C2CF3385F481F80 /* SessionListView.swift */; };
+		ED5232E44DC5253148C7F41C /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87EBE2EFB46861A866EC8CB6 /* KeychainStore.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		23C7D2AF27179DA89B5E8A86 /* GrokRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GrokRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		26194C127900A1E23DB75ECD /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		40532733B5B8D6224FE3C291 /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
+		6050DE69E3A6D7D2420C256C /* GrokRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokRemoteApp.swift; sourceTree = "<group>"; };
+		87EBE2EFB46861A866EC8CB6 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		88BF528AA738F52C30ED4F1B /* ChatBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBlockView.swift; sourceTree = "<group>"; };
+		97D363625C2CF3385F481F80 /* SessionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListView.swift; sourceTree = "<group>"; };
+		9AACEF2B35F22E364DE3FCC4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CCC4B4F2AD00880CB575254D /* GrokRemoteClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokRemoteClient.swift; sourceTree = "<group>"; };
+		CF9F870E98665D4140012A68 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		DAFEC3CC1513EBCCA758A714 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
+		F5DFB41EB7797C9245B4C0F5 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1E630D1A5534A7CD4619CB13 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				6050DE69E3A6D7D2420C256C /* GrokRemoteApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		49FA55CF5C6DA2DA542C1D11 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				9AACEF2B35F22E364DE3FCC4 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		5518EA6A8C878EEFDE37056B /* GrokRemote */ = {
+			isa = PBXGroup;
+			children = (
+				1E630D1A5534A7CD4619CB13 /* App */,
+				68127A0DE53C3AAF30323B9B /* Core */,
+				49FA55CF5C6DA2DA542C1D11 /* Resources */,
+				C94AEA0676052789066FB2AA /* Views */,
+			);
+			path = GrokRemote;
+			sourceTree = "<group>";
+		};
+		5AE1A391DF991357F1E35605 = {
+			isa = PBXGroup;
+			children = (
+				5518EA6A8C878EEFDE37056B /* GrokRemote */,
+				E22E84604317B73089CCE295 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		68127A0DE53C3AAF30323B9B /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				40532733B5B8D6224FE3C291 /* ChatStore.swift */,
+				CCC4B4F2AD00880CB575254D /* GrokRemoteClient.swift */,
+				87EBE2EFB46861A866EC8CB6 /* KeychainStore.swift */,
+				CF9F870E98665D4140012A68 /* Models.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		C94AEA0676052789066FB2AA /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				88BF528AA738F52C30ED4F1B /* ChatBlockView.swift */,
+				26194C127900A1E23DB75ECD /* ChatView.swift */,
+				DAFEC3CC1513EBCCA758A714 /* PairingView.swift */,
+				F5DFB41EB7797C9245B4C0F5 /* RootView.swift */,
+				97D363625C2CF3385F481F80 /* SessionListView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		E22E84604317B73089CCE295 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				23C7D2AF27179DA89B5E8A86 /* GrokRemote.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8268C83EE87BBFB6D3438BF0 /* GrokRemote */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 603E01974D8027B8CAAE9B86 /* Build configuration list for PBXNativeTarget "GrokRemote" */;
+			buildPhases = (
+				05A3BE8414C5C8405AEFEE73 /* Sources */,
+				73C80C5864F4EBDFE167178B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GrokRemote;
+			packageProductDependencies = (
+			);
+			productName = GrokRemote;
+			productReference = 23C7D2AF27179DA89B5E8A86 /* GrokRemote.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		FC6EDE2DB4FA748CD16265D7 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					8268C83EE87BBFB6D3438BF0 = {
+						DevelopmentTeam = "";
+					};
+				};
+			};
+			buildConfigurationList = A5FA637952C851AA26529BA9 /* Build configuration list for PBXProject "GrokRemote" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 5AE1A391DF991357F1E35605;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = E22E84604317B73089CCE295 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8268C83EE87BBFB6D3438BF0 /* GrokRemote */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		73C80C5864F4EBDFE167178B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7B2496CBB931838405FDB6F4 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		05A3BE8414C5C8405AEFEE73 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C5771B3E2AAC0032BD776955 /* ChatBlockView.swift in Sources */,
+				03B59F5A72B97CBF4D3C1FB4 /* ChatStore.swift in Sources */,
+				ADC7203018A25E96721EDADB /* ChatView.swift in Sources */,
+				97434DC4419F4FA4B008CCC0 /* GrokRemoteApp.swift in Sources */,
+				966CEB1504E29A0CCD4C41B2 /* GrokRemoteClient.swift in Sources */,
+				ED5232E44DC5253148C7F41C /* KeychainStore.swift in Sources */,
+				861850556E42EA71BB265943 /* Models.swift in Sources */,
+				94739CE7954D55D916BD5AC8 /* PairingView.swift in Sources */,
+				CDBC377FDEA5C5302AEE54D0 /* RootView.swift in Sources */,
+				D9A734968791A4A0A87D3081 /* SessionListView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1FBBD0587ED5C1A683C1CCCF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		44275BC60A0635E4DF2E741C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		53CE05D769D36A9B141E4DFA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Grok Remote";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接局域网中的 grok-remote 服务";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = icu.lpitiless.grokremote;
+				PRODUCT_NAME = "Grok Remote";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		67C52990DF7B21431A48CF71 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Grok Remote";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接局域网中的 grok-remote 服务";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = icu.lpitiless.grokremote;
+				PRODUCT_NAME = "Grok Remote";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		603E01974D8027B8CAAE9B86 /* Build configuration list for PBXNativeTarget "GrokRemote" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				67C52990DF7B21431A48CF71 /* Debug */,
+				53CE05D769D36A9B141E4DFA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A5FA637952C851AA26529BA9 /* Build configuration list for PBXProject "GrokRemote" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				44275BC60A0635E4DF2E741C /* Debug */,
+				1FBBD0587ED5C1A683C1CCCF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = FC6EDE2DB4FA748CD16265D7 /* Project object */;
+}
