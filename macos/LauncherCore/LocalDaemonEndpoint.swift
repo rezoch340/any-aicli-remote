@@ -3,6 +3,7 @@ import Foundation
 struct LocalDaemonEndpoint: Equatable {
     static let healthPath = "/health"
     static let configurationPath = "/config.json"
+    static let statusPath = "/api/stack/status"
     static let stopPath = "/api/stack/stop"
 
     let url: URL

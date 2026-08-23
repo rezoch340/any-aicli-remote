@@ -3,12 +3,16 @@
 package compat
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/atomicfile"
 )
 
 const (
@@ -17,6 +21,8 @@ const (
 
 	legacyAuthenticationCookieName = "grok_remote_key"
 	legacyAuthenticationHeaderName = "X-Grok-Remote-Key"
+	archivedSessionsFileName       = "archived_sessions.json"
+	legacyArchiveIDsFieldName      = "ids"
 )
 
 var legacyEnvironmentKeys = map[string]string{
@@ -104,11 +110,13 @@ func MigrateDataFiles(dataDirectory, homeDirectory string, migratePairingSecret 
 		return fmt.Errorf("create data directory: %w", operationError)
 	}
 	fileMappings := [][2]string{
-		{"archived_sessions.json", "archived_sessions.json"},
 		{"loops.json", "loops.json"},
 	}
 	if migratePairingSecret {
 		fileMappings = append(fileMappings, [2]string{"pairing-secret", ".ui-secret"})
+	}
+	if operationError := migrateArchivedSessions(dataDirectory, legacyDataDirectory); operationError != nil {
+		return operationError
 	}
 	for _, fileMapping := range fileMappings {
 		destinationPath := filepath.Join(dataDirectory, fileMapping[0])
@@ -120,9 +128,87 @@ func MigrateDataFiles(dataDirectory, homeDirectory string, migratePairingSecret 
 		if operationError != nil {
 			continue
 		}
-		if operationError := os.WriteFile(destinationPath, data, 0o600); operationError != nil {
+		if operationError := atomicfile.WritePrivate(destinationPath, data); operationError != nil {
 			return fmt.Errorf("migrate legacy data file: %w", operationError)
 		}
+	}
+	return nil
+}
+
+// ParseArchivedSessionIDs reads both the current array format and the legacy
+// object format containing an ids array. The returned flag identifies legacy
+// input so callers may rewrite it in the current format when appropriate.
+func ParseArchivedSessionIDs(data []byte) ([]string, bool, error) {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return nil, false, fmt.Errorf("invalid archived sessions JSON")
+	}
+	if strings.HasPrefix(trimmed, "[") {
+		var sessionIDs []string
+		if operationError := json.Unmarshal(data, &sessionIDs); operationError != nil || sessionIDs == nil {
+			if operationError != nil {
+				return nil, false, operationError
+			}
+			return nil, false, fmt.Errorf("invalid archived sessions array")
+		}
+		return sessionIDs, false, nil
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil, false, fmt.Errorf("invalid archived sessions JSON")
+	}
+	var archiveObject map[string]json.RawMessage
+	if operationError := json.Unmarshal(data, &archiveObject); operationError != nil {
+		return nil, false, operationError
+	}
+	idsData, present := archiveObject[legacyArchiveIDsFieldName]
+	if !present || string(idsData) == "null" {
+		return nil, false, fmt.Errorf("invalid legacy archived sessions ids")
+	}
+	var sessionIDs []string
+	if operationError := json.Unmarshal(idsData, &sessionIDs); operationError != nil || sessionIDs == nil {
+		if operationError != nil {
+			return nil, false, operationError
+		}
+		return nil, false, fmt.Errorf("invalid legacy archived sessions ids")
+	}
+	return sessionIDs, true, nil
+}
+
+func migrateArchivedSessions(dataDirectory, legacyDataDirectory string) error {
+	destinationPath := filepath.Join(dataDirectory, archivedSessionsFileName)
+	data, operationError := os.ReadFile(destinationPath)
+	if operationError == nil {
+		sessionIDs, legacy, parseError := ParseArchivedSessionIDs(data)
+		if parseError != nil || !legacy {
+			return nil
+		}
+		return writeArchivedSessions(destinationPath, sessionIDs)
+	}
+	if !errors.Is(operationError, os.ErrNotExist) {
+		return fmt.Errorf("read archived sessions destination: %w", operationError)
+	}
+	sourcePath := filepath.Join(legacyDataDirectory, archivedSessionsFileName)
+	data, operationError = os.ReadFile(sourcePath)
+	if errors.Is(operationError, os.ErrNotExist) {
+		return nil
+	}
+	if operationError != nil {
+		return fmt.Errorf("read legacy archived sessions: %w", operationError)
+	}
+	sessionIDs, _, operationError := ParseArchivedSessionIDs(data)
+	if operationError != nil {
+		return fmt.Errorf("parse legacy archived sessions: %w", operationError)
+	}
+	return writeArchivedSessions(destinationPath, sessionIDs)
+}
+
+func writeArchivedSessions(path string, sessionIDs []string) error {
+	data, operationError := json.MarshalIndent(sessionIDs, "", "  ")
+	if operationError != nil {
+		return fmt.Errorf("encode archived sessions: %w", operationError)
+	}
+	if operationError := atomicfile.WritePrivate(path, append(data, '\n')); operationError != nil {
+		return fmt.Errorf("migrate archived sessions: %w", operationError)
 	}
 	return nil
 }

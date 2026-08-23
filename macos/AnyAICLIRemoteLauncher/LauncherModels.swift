@@ -61,6 +61,26 @@ struct RuntimeConfiguration: Decodable, Equatable {
   }
 }
 
+struct DaemonStackStatus: Decodable, Equatable {
+  let ok: Bool
+  let daemonPort: Int
+  let agentPort: Int
+  let selfPID: Int
+  let providerID: String
+  let hubUp: Bool
+  let agentListening: Bool
+
+  enum CodingKeys: String, CodingKey {
+    case ok
+    case daemonPort = "daemon_port"
+    case agentPort = "agent_port"
+    case selfPID = "self_pid"
+    case providerID = "provider_id"
+    case hubUp = "hub_up"
+    case agentListening = "agent_listening"
+  }
+}
+
 struct LogEntry: Identifiable, Equatable {
   let id = UUID()
   let date: Date

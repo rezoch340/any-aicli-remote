@@ -2,6 +2,9 @@ package sessionapi
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
@@ -92,6 +95,45 @@ func TestArchivedSessionsPersist(testContext *testing.T) {
 	loaded, operationError := service.Archived()
 	if operationError != nil || loaded.Count != 1 || loaded.IDs[0] != "session-one" {
 		testContext.Fatalf("archived = %#v, error = %v", loaded, operationError)
+	}
+}
+
+func TestArchivedSessionsReadLegacyFormatAndSaveCurrentFormat(testContext *testing.T) {
+	service := newSessionService(testContext)
+	archivePath := filepath.Join(service.DataDirectory, "archived_sessions.json")
+	legacyContents := []byte(`{"ids":[" session-a ","session-a"],"updatedAt":123}`)
+	if operationError := os.WriteFile(archivePath, legacyContents, 0o600); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	loaded, operationError := service.Archived()
+	if operationError != nil || len(loaded.IDs) != 1 || loaded.IDs[0] != "session-a" {
+		testContext.Fatalf("archived = %#v, error = %v", loaded, operationError)
+	}
+	contents, operationError := os.ReadFile(archivePath)
+	if operationError != nil || string(contents) != string(legacyContents) {
+		testContext.Fatalf("GET modified archive to %q, error = %v", contents, operationError)
+	}
+	result, operationError := service.SetArchived(SetArchivedRequest{IDs: []string{"session-b"}})
+	if operationError != nil || len(result.IDs) != 1 || result.IDs[0] != "session-b" {
+		testContext.Fatalf("set archived = %#v, error = %v", result, operationError)
+	}
+	contents, operationError = os.ReadFile(archivePath)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	var sessionIDs []string
+	if operationError := json.Unmarshal(contents, &sessionIDs); operationError != nil || len(sessionIDs) != 1 || sessionIDs[0] != "session-b" {
+		testContext.Fatalf("archive contents = %q, error = %v", contents, operationError)
+	}
+}
+
+func TestArchivedSessionsRejectMalformedData(testContext *testing.T) {
+	service := newSessionService(testContext)
+	if operationError := os.WriteFile(filepath.Join(service.DataDirectory, "archived_sessions.json"), []byte(`{"ids":"session-a"}`), 0o600); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if _, operationError := service.Archived(); operationError == nil {
+		testContext.Fatal("expected malformed archive error")
 	}
 }
 

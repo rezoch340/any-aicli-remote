@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/rezoch340/any-aicli-remote/backend/internal/atomicfile"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/compat"
 	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
 
@@ -352,8 +353,8 @@ func (service *Service) loadArchivedLocked() ([]string, string, error) {
 	if operationError != nil {
 		return nil, path, operationError
 	}
-	var sessionIDs []string
-	if operationError := json.Unmarshal(data, &sessionIDs); operationError != nil {
+	sessionIDs, _, operationError := compat.ParseArchivedSessionIDs(data)
+	if operationError != nil {
 		return nil, path, operationError
 	}
 	return cleanIDs(sessionIDs), path, nil

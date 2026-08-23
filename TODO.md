@@ -22,10 +22,10 @@ then include the checkbox update in that feature's commit.
   - [x] This item must not include Android or iOS.
   - Commit: `♻️ macOS：接入统一守护进程配置`
 
-- [ ] **3. 真实 Grok 的后端+Launcher E2E**
-  - [ ] Against the real Grok CLI, prove idle startup has no session, then verify new/load/resume lifecycle, workspace isolation, streaming, cancel, permission, reconnect, file, terminal, and archived history behavior.
-  - [ ] Verify Launcher start/stop/restart together with status and QR pairing payload behavior.
-  - [ ] This item must not modify or validate Android or iOS; freeze the backend+Launcher E2E contract before clients begin.
+- [x] **3. 真实 Grok 的后端+Launcher E2E**
+  - [x] Against the real Grok CLI, prove idle startup has no session, then verify new/load/resume lifecycle, workspace isolation, streaming, cancel, permission, reconnect, file, terminal, and archived history behavior.
+  - [x] Verify Launcher start/stop/restart together with status and QR pairing payload behavior.
+  - [x] This item must not modify or validate Android or iOS; freeze the backend+Launcher E2E contract before clients begin.
   - Commit: `🧪 后端：验证 Grok 与启动器生命周期`
 
 - [ ] **4. 原生客户端功能与 E2E**

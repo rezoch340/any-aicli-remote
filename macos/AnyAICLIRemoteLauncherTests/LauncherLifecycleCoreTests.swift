@@ -111,6 +111,18 @@ final class LauncherLifecycleCoreTests: XCTestCase {
     XCTAssertTrue(value.isHealthy)
     XCTAssertEqual(value.hubClients, 2)
   }
+  func testStackStatusFields() throws {
+    let value = try JSONDecoder().decode(
+      DaemonStackStatus.self,
+      from: Data(
+        #"{"ok":true,"daemon_port":8765,"agent_port":8766,"self_pid":42,"provider_id":"grok","hub_up":false,"agent_listening":false}"#
+          .utf8))
+    XCTAssertEqual(
+      value,
+      DaemonStackStatus(
+        ok: true, daemonPort: 8765, agentPort: 8766, selfPID: 42, providerID: "grok",
+        hubUp: false, agentListening: false))
+  }
   func testHTTPRequests() throws {
     let client = DaemonHTTPClient(
       endpoint: try LocalDaemonEndpoint(bindAddress: "", port: 99), pairingSecret: "secret",
@@ -123,6 +135,11 @@ final class LauncherLifecycleCoreTests: XCTestCase {
     XCTAssertEqual(config.url?.path, "/config.json")
     XCTAssertEqual(
       config.value(forHTTPHeaderField: ProductIdentifier.authenticationHeaderName), "secret")
+    let status = client.statusRequest()
+    XCTAssertEqual(status.httpMethod, "GET")
+    XCTAssertEqual(status.url?.path, "/api/stack/status")
+    XCTAssertEqual(
+      status.value(forHTTPHeaderField: ProductIdentifier.authenticationHeaderName), "secret")
     let stop = client.stopRequest()
     XCTAssertEqual(stop.httpMethod, "POST")
     XCTAssertEqual(stop.url?.path, "/api/stack/stop")

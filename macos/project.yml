@@ -98,6 +98,8 @@ targets:
       - path: AnyAICLIRemoteLauncher/LauncherLogBuffer.swift
       - path: AnyAICLIRemoteLauncher/LifecycleGeneration.swift
       - path: AnyAICLIRemoteLauncher/RuntimePairing.swift
+      - path: AnyAICLIRemoteLauncher/ManagedDaemonProcess.swift
+      - path: AnyAICLIRemoteLauncher/PairingSecretStore.swift
       - path: AnyAICLIRemoteLauncher/DaemonControllerError.swift
       - path: ../apple/Shared
         group: AppleShared

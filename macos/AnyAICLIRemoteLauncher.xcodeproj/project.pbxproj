@@ -9,10 +9,12 @@
 /* Begin PBXBuildFile section */
 		023F6741D113871F964E98DE /* CanonicalDaemonConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADDFD954D82ACE8CDAD7D7FC /* CanonicalDaemonConfiguration.swift */; };
 		0306E4D7931EF6168C3686BB /* DaemonController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82394DCB0D35135EFFF4626 /* DaemonController.swift */; };
+		13B6C7D343EAD373AB0B14B3 /* ManagedDaemonProcess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2B08DF7F1D4CF8B90290E9 /* ManagedDaemonProcess.swift */; };
 		1669C1E5C18B707C9FA47344 /* LifecycleGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B84E9883BEDFAD8A007F509 /* LifecycleGeneration.swift */; };
 		19A807658CE47EA9A718F081 /* DaemonConfigurationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4258AAD5372136867418E90D /* DaemonConfigurationStore.swift */; };
 		1A389ECBFEE0EA1839C18E2F /* LauncherPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272E92B2937A874EBC76301D /* LauncherPolicy.swift */; };
 		1ECC994FDC0F4E93E8A74989 /* DaemonLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1962E6535909C6C16776B6BE /* DaemonLocator.swift */; };
+		2213C742C731B17785B850C1 /* PairingSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED3281B80B1D3C057A1ACA8C /* PairingSecretStore.swift */; };
 		22403FEA418E637050A9CE86 /* DaemonLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F75ECBA28DB63231A0EB15 /* DaemonLaunchPlan.swift */; };
 		26838749E3035C224E96D044 /* PairingSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED3281B80B1D3C057A1ACA8C /* PairingSecretStore.swift */; };
 		2893D76EB1BFED124267B996 /* DaemonCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1352ACB147F3357122CD0F7C /* DaemonCommand.swift */; };
@@ -47,6 +49,7 @@
 		CAF366965BF5E31B37E31BFC /* DaemonControllerError.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4174888F5E649FAA18F2482 /* DaemonControllerError.swift */; };
 		D5FDA0CACFC70AE37836B9B9 /* LauncherSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FFF02DAB5DB24357215CECE /* LauncherSettings.swift */; };
 		D9C2233062F877FC65EA2FE8 /* DaemonConfigurationMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76D88AA9A9592134AA3C819 /* DaemonConfigurationMigration.swift */; };
+		DAD961F0EE560CFA59102C8F /* LauncherRealLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F537776F66C86369AFE17B8 /* LauncherRealLifecycleTests.swift */; };
 		DF3FF7FED376CB6F5DE4FA3E /* ManagedDaemonProcess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2B08DF7F1D4CF8B90290E9 /* ManagedDaemonProcess.swift */; };
 		E76D305A76C2FB2F1C453B05 /* DaemonConfigurationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4258AAD5372136867418E90D /* DaemonConfigurationStore.swift */; };
 		E887806DD7A2F9D81E68C01B /* DaemonLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F75ECBA28DB63231A0EB15 /* DaemonLaunchPlan.swift */; };
@@ -84,6 +87,7 @@
 		8FEEC5B3FF3BDDC8443D288F /* AnyAICLIRemoteLauncherApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyAICLIRemoteLauncherApp.swift; sourceTree = "<group>"; };
 		906F7634B02ED16DBC854E95 /* AnyAICLIRemoteLauncherTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AnyAICLIRemoteLauncherTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9CEA5C6CDA9CEBFF88894126 /* LauncherPreferenceKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherPreferenceKeys.swift; sourceTree = "<group>"; };
+		9F537776F66C86369AFE17B8 /* LauncherRealLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherRealLifecycleTests.swift; sourceTree = "<group>"; };
 		ADDFD954D82ACE8CDAD7D7FC /* CanonicalDaemonConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalDaemonConfiguration.swift; sourceTree = "<group>"; };
 		BD848EFD237EDA597843610B /* AnyAICLIRemoteLauncher.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnyAICLIRemoteLauncher.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D8F83379EDA6748B3590AB81 /* LauncherLogBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherLogBuffer.swift; sourceTree = "<group>"; };
@@ -171,6 +175,7 @@
 				67E031C4D15093A02D91E1F2 /* DaemonControllerSupportTests.swift */,
 				8EB31E91665016CD0912E4F9 /* GenericPasswordStorePolicyTests.swift */,
 				8B6DBA7444AE7A0648F46A20 /* LauncherLifecycleCoreTests.swift */,
+				9F537776F66C86369AFE17B8 /* LauncherRealLifecycleTests.swift */,
 			);
 			path = AnyAICLIRemoteLauncherTests;
 			sourceTree = "<group>";
@@ -330,9 +335,12 @@
 				EC8BAA3511942BD6F00FE1BA /* LauncherModels.swift in Sources */,
 				8208C0B45FC6A3DB05B0B956 /* LauncherPolicy.swift in Sources */,
 				38E24949EE56D243CC6121D7 /* LauncherPreferenceKeys.swift in Sources */,
+				DAD961F0EE560CFA59102C8F /* LauncherRealLifecycleTests.swift in Sources */,
 				D5FDA0CACFC70AE37836B9B9 /* LauncherSettings.swift in Sources */,
 				1669C1E5C18B707C9FA47344 /* LifecycleGeneration.swift in Sources */,
 				AE725EB9C1DF8F86639F71F7 /* LocalDaemonEndpoint.swift in Sources */,
+				13B6C7D343EAD373AB0B14B3 /* ManagedDaemonProcess.swift in Sources */,
+				2213C742C731B17785B850C1 /* PairingSecretStore.swift in Sources */,
 				70C897D15E1F0F9EB2350DD7 /* ProductIdentifiers.swift in Sources */,
 				9B72EE1ED3F868915C9C5097 /* RuntimePairing.swift in Sources */,
 			);

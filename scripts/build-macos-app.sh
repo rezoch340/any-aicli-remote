@@ -73,11 +73,19 @@ xcodebuild \
   DEVELOPMENT_TEAM= \
   build-for-testing
 TEST_BUNDLE_PATH="$TEST_DERIVED_DATA_DIRECTORY/Build/Products/Debug/AnyAICLIRemoteLauncherTests.xctest"
+TEST_APP_PATH="$TEST_DERIVED_DATA_DIRECTORY/Build/Products/Debug/Any AI CLI Remote Launcher.app"
+TEST_DAEMON_PATH="$TEST_APP_PATH/Contents/MacOS/any-aicli-remote-daemon"
 if [[ ! -d "$TEST_BUNDLE_PATH" ]]; then
   echo "error: expected test bundle was not produced at $TEST_BUNDLE_PATH" >&2
   exit 1
 fi
-xcrun xctest "$TEST_BUNDLE_PATH"
+if [[ ! -x "$TEST_DAEMON_PATH" ]]; then
+  echo "error: Debug app does not contain an executable daemon" >&2
+  exit 1
+fi
+ANY_AI_CLI_REMOTE_LAUNCHER_E2E=1 \
+ANY_AI_CLI_REMOTE_LAUNCHER_E2E_DAEMON="$TEST_DAEMON_PATH" \
+  xcrun xctest "$TEST_BUNDLE_PATH"
 cleanup_test_derived_data
 trap - EXIT
 

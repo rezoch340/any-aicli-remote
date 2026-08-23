@@ -59,6 +59,10 @@ struct DaemonHTTPClient {
         makeRequest(path: LocalDaemonEndpoint.configurationPath, method: HTTPMethod.get, authenticated: true)
     }
 
+    func statusRequest() -> URLRequest {
+        makeRequest(path: LocalDaemonEndpoint.statusPath, method: HTTPMethod.get, authenticated: true)
+    }
+
     func stopRequest() -> URLRequest {
         var request = makeRequest(path: LocalDaemonEndpoint.stopPath, method: HTTPMethod.post, authenticated: true)
         request.setValue(HTTPHeader.json, forHTTPHeaderField: HTTPHeader.contentType)
@@ -72,6 +76,10 @@ struct DaemonHTTPClient {
 
     func configuration() async throws -> RuntimeConfiguration {
         try await decode(configurationRequest())
+    }
+
+    func status() async throws -> DaemonStackStatus {
+        try await decode(statusRequest())
     }
 
     func stop() async throws {

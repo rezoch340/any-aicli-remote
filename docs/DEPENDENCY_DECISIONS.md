@@ -28,6 +28,14 @@ libraries. Keep only the smallest compatible dependency or adapter.
   `historydata` contains only the `updates.jsonl` reader used by that adapter; do not add a second Store,
   directory index, working-directory encoder, or summary parser beside it.
 
+## Archived-session compatibility
+
+- Checked: the existing `compat`/`sessionapi` code and Go `encoding/json`.
+- Decision: the current `[]string` and legacy `{ids:[...]}` forms are two small, fixed JSON shapes; no
+  third-party dependency or hand-written token parser is needed.
+- Boundary: `compat.ParseArchivedSessionIDs` is the single reader. Migration and `SetArchived` write only
+  the current array through `atomicfile` private atomic writes; other packages must not duplicate compatibility parsing.
+
 ## JSON Lines
 
 - Checked: third-party JSONL packages and the Go standard library.
