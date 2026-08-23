@@ -1,0 +1,1 @@
+{"schema_version":1,"request_timeout_seconds":2,"resource_timeout_seconds":3,"health_poll_interval_seconds":2,"stop_poll_interval_seconds":0.35,"stop_poll_attempts":6,"interrupt_grace_seconds":1,"maximum_log_chunk_characters":8192,"maximum_log_entries":1000,"daemon_search_parent_depth":7,"executable_search_paths":["~/.local/bin","~/bin","/opt/homebrew/bin","/usr/local/bin"]}

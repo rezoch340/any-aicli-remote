@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D9C5652D915669E0F245A6D6"
-               BuildableName = "GrokRemoteLauncher.app"
-               BlueprintName = "GrokRemoteLauncher"
-               ReferencedContainer = "container:GrokRemoteLauncher.xcodeproj">
+               BlueprintIdentifier = "18AB0C5BAB0DC80BA80CBED3"
+               BuildableName = "AnyAICLIRemoteLauncher.app"
+               BlueprintName = "AnyAICLIRemoteLauncher"
+               ReferencedContainer = "container:AnyAICLIRemoteLauncher.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -32,13 +32,24 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9C5652D915669E0F245A6D6"
-            BuildableName = "GrokRemoteLauncher.app"
-            BlueprintName = "GrokRemoteLauncher"
-            ReferencedContainer = "container:GrokRemoteLauncher.xcodeproj">
+            BlueprintIdentifier = "18AB0C5BAB0DC80BA80CBED3"
+            BuildableName = "AnyAICLIRemoteLauncher.app"
+            BlueprintName = "AnyAICLIRemoteLauncher"
+            ReferencedContainer = "container:AnyAICLIRemoteLauncher.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "7B46BC1DD5D922BF3A79EDA9"
+               BuildableName = "AnyAICLIRemoteLauncherTests.xctest"
+               BlueprintName = "AnyAICLIRemoteLauncherTests"
+               ReferencedContainer = "container:AnyAICLIRemoteLauncher.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>
@@ -57,10 +68,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9C5652D915669E0F245A6D6"
-            BuildableName = "GrokRemoteLauncher.app"
-            BlueprintName = "GrokRemoteLauncher"
-            ReferencedContainer = "container:GrokRemoteLauncher.xcodeproj">
+            BlueprintIdentifier = "18AB0C5BAB0DC80BA80CBED3"
+            BuildableName = "AnyAICLIRemoteLauncher.app"
+            BlueprintName = "AnyAICLIRemoteLauncher"
+            ReferencedContainer = "container:AnyAICLIRemoteLauncher.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -76,10 +87,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D9C5652D915669E0F245A6D6"
-            BuildableName = "GrokRemoteLauncher.app"
-            BlueprintName = "GrokRemoteLauncher"
-            ReferencedContainer = "container:GrokRemoteLauncher.xcodeproj">
+            BlueprintIdentifier = "18AB0C5BAB0DC80BA80CBED3"
+            BuildableName = "AnyAICLIRemoteLauncher.app"
+            BlueprintName = "AnyAICLIRemoteLauncher"
+            ReferencedContainer = "container:AnyAICLIRemoteLauncher.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>

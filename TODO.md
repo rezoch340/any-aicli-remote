@@ -15,11 +15,11 @@ then include the checkbox update in that feature's commit.
   - [x] Add side-effect-free `config show`, `config validate`, and `config apply` commands. They must not start the Provider, create a session, or create secret material.
   - Commit: `✨ 配置：建立统一守护进程配置`
 
-- [ ] **2. macOS Launcher + CLI 共用配置**
-  - [ ] Freeze and validate the daemon configuration commands and serialized schema from item 1 before changing Launcher source; replace Launcher-owned defaults and `UserDefaults` service settings with the canonical JSON configuration and daemon validation path.
-  - [ ] Preserve existing configuration integration, migration, and secret rules. Launch with only the configuration path plus the temporary permission-restricted secret file; keep pairing-link generation and effective runtime data daemon-owned.
-  - [ ] Add local Launcher functional build/start/stop/restart and QR pairing payload verification. Platform-required ad-hoc signing is only a local build mechanism, not Release signing acceptance.
-  - [ ] This item must not include Android or iOS.
+- [x] **2. macOS Launcher + CLI 共用配置**
+  - [x] Freeze and validate the daemon configuration commands and serialized schema from item 1 before changing Launcher source; replace Launcher-owned defaults and `UserDefaults` service settings with the canonical JSON configuration and daemon validation path.
+  - [x] Preserve existing configuration integration, migration, and secret rules. Launch with only the configuration path plus the temporary permission-restricted secret file; keep pairing-link generation and effective runtime data daemon-owned.
+  - [x] Add local Launcher functional build/start/stop/restart and QR pairing payload verification. Platform-required ad-hoc signing is only a local build mechanism, not Release signing acceptance.
+  - [x] This item must not include Android or iOS.
   - Commit: `♻️ macOS：接入统一守护进程配置`
 
 - [ ] **3. 真实 Grok 的后端+Launcher E2E**

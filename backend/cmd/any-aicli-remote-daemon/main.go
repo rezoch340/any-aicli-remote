@@ -37,6 +37,11 @@ func run(arguments []string, standardInput io.Reader, standardOutput, standardEr
 	return exitSuccess
 }
 func runDaemon(arguments []string, standardError io.Writer) error {
+	executionContext, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return runDaemonWithContext(executionContext, arguments, standardError)
+}
+func runDaemonWithContext(executionContext context.Context, arguments []string, standardError io.Writer) error {
 	configuration, errorValue := config.Parse(arguments)
 	if errorValue != nil {
 		return errorValue
@@ -48,8 +53,6 @@ func runDaemon(arguments []string, standardError io.Writer) error {
 	}
 	defer daemon.Close()
 	logger.Info("Any AI CLI Remote daemon starting", "local", fmt.Sprintf("http://127.0.0.1:%d/", configuration.Port), "pair", fmt.Sprintf("http://127.0.0.1:%d/pair", configuration.Port), "runtime", configuration.RuntimeDirectory, "agent", fmt.Sprintf("%s:%d", configuration.AgentHost, configuration.AgentPort))
-	executionContext, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 	if errorValue := daemon.Run(executionContext); errors.Is(errorValue, server.AlreadyRunningError) {
 		logger.Info("healthy Any AI CLI Remote already owns the HTTP port; standing down", "port", configuration.Port)
 		return nil

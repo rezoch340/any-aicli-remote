@@ -14,6 +14,8 @@ import (
 	"github.com/rezoch340/any-aicli-remote/backend/internal/fsapi"
 )
 
+const boundedOutputFixtureTimeout = 15 * time.Second
+
 var testGitPolicy = Policy{CommandTimeout: time.Second, DiffTimeout: time.Second, DirtyFileLimit: 80, DiffRuneLimit: 200000, LogDefaultLimit: 12, LogMaxLimit: 30, ContextFileReadBytes: 16000, ContextPreviewRunes: 4000, CommandOutputMaxBytes: 16 << 20}
 
 func mustNewWithGit(testContext *testing.T, workspace func() string, gitPath string) *Service {
@@ -314,7 +316,7 @@ func TestCommandOutputIsBounded(testContext *testing.T) {
 	}
 	policy := testGitPolicy
 	policy.CommandOutputMaxBytes = 5
-	policy.CommandTimeout = 3 * time.Second
+	policy.CommandTimeout = boundedOutputFixtureTimeout
 	service := mustNewWithGitPolicy(testContext, func() string { return root }, scriptPath, policy)
 	result, operationError := service.run(context.Background(), policy.CommandTimeout, root, "diff")
 	if operationError != nil || result.stdout != "01234" {

@@ -140,3 +140,49 @@ Configuration and private state persistence use `github.com/google/renameio/v2` 
 atomic replacement. It was selected over `creachadair/atomicfile` and direct `os.Rename`: renameio
 provides a maintained temporary-file-and-rename workflow with explicit permissions. The daemon target
 is macOS and Linux; renameio's documented platform support does not include Windows.
+
+## Apple generic-password storage
+
+- Checked: Apple's Security framework documentation for
+  [`kSecClassGenericPassword`](https://developer.apple.com/documentation/security/ksecclassgenericpassword),
+  [`SecItemAdd`](https://developer.apple.com/documentation/security/secitemadd(_:_:)),
+  [`SecItemCopyMatching`](https://developer.apple.com/documentation/security/secitemcopymatching(_:_:)),
+  and [TN3137 on macOS keychains](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains).
+  Apple's APIs already provide encrypted generic-password CRUD, duplicate-item status handling, access
+  groups, and portable data-protection-keychain behavior, so a third-party wrapper would duplicate the
+  platform contract.
+- Decision: for this macOS Launcher, compile and reuse the single
+  `apple/Shared/GenericPasswordStore.swift` SecItem primitive. It keys items by service, account, and
+  optional access group, uses `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, and opts into
+  `kSecUseDataProtectionKeychain` as Apple recommends for cross-platform SecItem behavior. Platform stores
+  own only their current/legacy namespaces and migration order; they must not duplicate SecItem dictionaries
+  or CRUD.
+- macOS policy: a provisioning profile must authorize the restricted keychain access-group entitlement used
+  by the data-protection keychain. A pure ad-hoc signature has no such authorization and returns
+  `errSecMissingEntitlement`. The launcher therefore uses a file-based fallback only for that exact status.
+  When the preferred data-protection item is absent, reads also probe for a prior file-based item and migrate
+  it automatically when a later profile-authorized build can access data protection. Other SecItem failures
+  always propagate.
+- macOS authority: the launcher's pairing secret lives in Keychain. It may read an existing current or
+  legacy `0600` file exactly once, write that value to Keychain, and then remove both persistent files. New
+  secrets are written only to Keychain.
+- daemon boundary: because the daemon accepts `--pairing-secret-file`, the launcher materializes a uniquely named
+  `0600` file in the user's temporary directory and passes only that path. The launcher deletes the file
+  after a successful health check, a launch failure, or process termination. The secret itself must never
+  appear in process arguments or logs. Authenticated launcher requests, including `/config.json`, send only
+  the current `X-Any-AI-CLI-Remote-Key`; legacy header names remain read-only migration data and are never
+  emitted by first-party clients.
+- Local macOS signing: use Xcode and the platform `codesign` tool rather than a custom signing layer. This
+  TODO's build script fixes the `-` pseudo-identity for the local ad-hoc signature and provides no optional
+  profile or identity switches. The script signs the daemon first, embeds it in the standard `Contents/MacOS`
+  nested-code location, and lets Xcode sign the outer app last. `--deep` is used only for final verification,
+  not signing, following Apple's
+  [nested-code signing guidance](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac)
+  and [code-signing build settings](https://developer.apple.com/documentation/xcode/build-settings-reference).
+  Developer ID signing, provisioning, and notarization are deferred to the final-release TODO.
+
+## macOS Launcher process and HTTP lifecycle dependencies
+
+- Checked: Apple Foundation documentation for [`Process.executableURL`](https://developer.apple.com/documentation/foundation/process/executableurl), [`Process.arguments`](https://developer.apple.com/documentation/foundation/process/arguments), [`Process.environment`](https://developer.apple.com/documentation/foundation/process/environment), [`Process.terminationHandler`](https://developer.apple.com/documentation/foundation/process/terminationhandler), [`URLSessionConfiguration`](https://developer.apple.com/documentation/foundation/urlsessionconfiguration), and [`FileHandle.availableData`](https://developer.apple.com/documentation/foundation/filehandle/availabledata).
+- Decision: continue using Foundation `Process`, `URLSession`, and `JSONSerialization` with the existing XcodeGen setup. Do not add third-party process, networking, or configuration dependencies: the standard library covers these requirements, while external libraries would duplicate capabilities and expand the dependency surface.
+- Boundary: the Launcher does not invoke a shell; it starts the fixed daemon only through `executableURL` plus an argument array. Configuration show/validate/apply is provided by the daemon CLI. HTTP operations use fixed, typed endpoints. Runtime parameters come from `LauncherPolicy.json`, and the pairing URL is returned by the daemon.

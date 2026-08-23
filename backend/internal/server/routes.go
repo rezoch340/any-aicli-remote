@@ -89,7 +89,7 @@ func daemonPage(title, message, deepLink string) string {
 	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>` + html.EscapeString(title) + `</title><style>body{font:16px system-ui;max-width:42rem;margin:12vh auto;padding:0 24px;background:#090b0f;color:#eef2f7}main{padding:28px;border:1px solid #29313d;border-radius:18px;background:#11151b}a{color:#67e8f9}</style></head><body><main><h1>` + html.EscapeString(title) + `</h1><p>` + html.EscapeString(message) + `</p>` + link + `</main></body></html>`
 }
 
-func (server *Server) configPayload() map[string]any {
+func (server *Server) configBasePayload() map[string]any {
 	return map[string]any{
 		"agent_host":  server.configuration.AgentHost,
 		"agent_port":  server.configuration.AgentPort,
@@ -107,8 +107,15 @@ func (server *Server) configPayload() map[string]any {
 	}
 }
 
+func (server *Server) configResponsePayload() map[string]any {
+	payload := server.configBasePayload()
+	payload["pairing_url"] = server.configuration.PairingURL(server.lanIP)
+	payload["pairing_deep_link"] = server.configuration.PairingDeepLink(server.lanIP)
+	return payload
+}
+
 func (server *Server) writeRuntimeConfig() error {
-	payload := server.configPayload()
+	payload := server.configBasePayload()
 	data, errorValue := json.MarshalIndent(payload, "", "  ")
 	if errorValue != nil {
 		return errorValue
@@ -118,7 +125,7 @@ func (server *Server) writeRuntimeConfig() error {
 
 func (server *Server) handleConfig(responseWriter http.ResponseWriter, _ *http.Request) {
 	responseWriter.Header().Set("Cache-Control", "no-store")
-	writeJSON(responseWriter, http.StatusOK, server.configPayload())
+	writeJSON(responseWriter, http.StatusOK, server.configResponsePayload())
 }
 
 func (server *Server) healthPayload() map[string]any {

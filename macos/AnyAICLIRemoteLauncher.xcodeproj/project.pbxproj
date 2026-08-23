@@ -1,0 +1,637 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		023F6741D113871F964E98DE /* CanonicalDaemonConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADDFD954D82ACE8CDAD7D7FC /* CanonicalDaemonConfiguration.swift */; };
+		0306E4D7931EF6168C3686BB /* DaemonController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82394DCB0D35135EFFF4626 /* DaemonController.swift */; };
+		1669C1E5C18B707C9FA47344 /* LifecycleGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B84E9883BEDFAD8A007F509 /* LifecycleGeneration.swift */; };
+		19A807658CE47EA9A718F081 /* DaemonConfigurationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4258AAD5372136867418E90D /* DaemonConfigurationStore.swift */; };
+		1A389ECBFEE0EA1839C18E2F /* LauncherPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272E92B2937A874EBC76301D /* LauncherPolicy.swift */; };
+		1ECC994FDC0F4E93E8A74989 /* DaemonLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1962E6535909C6C16776B6BE /* DaemonLocator.swift */; };
+		22403FEA418E637050A9CE86 /* DaemonLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F75ECBA28DB63231A0EB15 /* DaemonLaunchPlan.swift */; };
+		26838749E3035C224E96D044 /* PairingSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED3281B80B1D3C057A1ACA8C /* PairingSecretStore.swift */; };
+		2893D76EB1BFED124267B996 /* DaemonCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1352ACB147F3357122CD0F7C /* DaemonCommand.swift */; };
+		3022DCF426ECEB2C1F246909 /* CanonicalDaemonConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADDFD954D82ACE8CDAD7D7FC /* CanonicalDaemonConfiguration.swift */; };
+		38E24949EE56D243CC6121D7 /* LauncherPreferenceKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CEA5C6CDA9CEBFF88894126 /* LauncherPreferenceKeys.swift */; };
+		4479E0B7CC30F3FC15E8AF25 /* DaemonConfigurationPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4177EA03ED5F9619B472CB1 /* DaemonConfigurationPath.swift */; };
+		4D66C1AA3EF6CBF6C8F3C0BD /* LauncherPreferenceKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CEA5C6CDA9CEBFF88894126 /* LauncherPreferenceKeys.swift */; };
+		509C07CE028CF675FBCD420F /* GenericPasswordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B808BDD3D2A926B50205B31 /* GenericPasswordStore.swift */; };
+		5AD9978E9B19B721D89C98DC /* ProductIdentifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65786D04A1E6BDBE35224CF5 /* ProductIdentifiers.swift */; };
+		64F3F8253C4786B427E04E96 /* DaemonControllerSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67E031C4D15093A02D91E1F2 /* DaemonControllerSupportTests.swift */; };
+		6F0699497BCC8CB970999CA8 /* RuntimePairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D0B2E5104690BB13F020BE7 /* RuntimePairing.swift */; };
+		70C897D15E1F0F9EB2350DD7 /* ProductIdentifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65786D04A1E6BDBE35224CF5 /* ProductIdentifiers.swift */; };
+		73E1DB39EE8E45C4A232C576 /* DaemonConfigurationPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4177EA03ED5F9619B472CB1 /* DaemonConfigurationPath.swift */; };
+		79277DD15396549F6EB247EA /* LauncherModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CEE36C26138FD2089A66D35 /* LauncherModels.swift */; };
+		79F4BC0CA345E3FB74D234BA /* QRCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CE63613E1EE787BE2292951 /* QRCodeView.swift */; };
+		7BA8EA19449C989FAAA799EC /* DaemonControllerError.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4174888F5E649FAA18F2482 /* DaemonControllerError.swift */; };
+		8152D9D4E12EAFB42ED0B638 /* DaemonLaunchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B55606B4160A83E5029636 /* DaemonLaunchEnvironment.swift */; };
+		8208C0B45FC6A3DB05B0B956 /* LauncherPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272E92B2937A874EBC76301D /* LauncherPolicy.swift */; };
+		84397E06655B6820637FFC72 /* AnyAICLIRemoteLauncherApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FEEC5B3FF3BDDC8443D288F /* AnyAICLIRemoteLauncherApp.swift */; };
+		897D4EE930D108C606A9B1D1 /* DaemonConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E7A68AD5E3D1794295F478 /* DaemonConfigurationTests.swift */; };
+		9216278B9133E024B73B2184 /* LauncherLogBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8F83379EDA6748B3590AB81 /* LauncherLogBuffer.swift */; };
+		9B72EE1ED3F868915C9C5097 /* RuntimePairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D0B2E5104690BB13F020BE7 /* RuntimePairing.swift */; };
+		9E584B6A1C83701FBDCF7A29 /* DaemonConfigurationMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76D88AA9A9592134AA3C819 /* DaemonConfigurationMigration.swift */; };
+		9EECF95690108FCD92141E61 /* DaemonCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1352ACB147F3357122CD0F7C /* DaemonCommand.swift */; };
+		A9E614E4B959A777992AADA3 /* DaemonLaunchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B55606B4160A83E5029636 /* DaemonLaunchEnvironment.swift */; };
+		AE725EB9C1DF8F86639F71F7 /* LocalDaemonEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70041BD33941230E7C26BA1E /* LocalDaemonEndpoint.swift */; };
+		B0BCA1874B804155DA4063AD /* LocalDaemonEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70041BD33941230E7C26BA1E /* LocalDaemonEndpoint.swift */; };
+		B222BC89FB945EBB49D6059E /* LauncherSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FFF02DAB5DB24357215CECE /* LauncherSettings.swift */; };
+		B39C39974CF8BD5BFE57CCDC /* GenericPasswordStorePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EB31E91665016CD0912E4F9 /* GenericPasswordStorePolicyTests.swift */; };
+		B929BC335297833CB8F251C7 /* DaemonHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49250838FAF8D74581891070 /* DaemonHTTPClient.swift */; };
+		BABF3121E449C50C004F0E45 /* GenericPasswordStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B808BDD3D2A926B50205B31 /* GenericPasswordStore.swift */; };
+		CAF366965BF5E31B37E31BFC /* DaemonControllerError.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4174888F5E649FAA18F2482 /* DaemonControllerError.swift */; };
+		D5FDA0CACFC70AE37836B9B9 /* LauncherSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FFF02DAB5DB24357215CECE /* LauncherSettings.swift */; };
+		D9C2233062F877FC65EA2FE8 /* DaemonConfigurationMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76D88AA9A9592134AA3C819 /* DaemonConfigurationMigration.swift */; };
+		DF3FF7FED376CB6F5DE4FA3E /* ManagedDaemonProcess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C2B08DF7F1D4CF8B90290E9 /* ManagedDaemonProcess.swift */; };
+		E76D305A76C2FB2F1C453B05 /* DaemonConfigurationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4258AAD5372136867418E90D /* DaemonConfigurationStore.swift */; };
+		E887806DD7A2F9D81E68C01B /* DaemonLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F75ECBA28DB63231A0EB15 /* DaemonLaunchPlan.swift */; };
+		E9DF5144873BB05CE949E9C6 /* DaemonHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49250838FAF8D74581891070 /* DaemonHTTPClient.swift */; };
+		EC743F0768CDE27B0556D010 /* LauncherLogBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8F83379EDA6748B3590AB81 /* LauncherLogBuffer.swift */; };
+		EC8BAA3511942BD6F00FE1BA /* LauncherModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CEE36C26138FD2089A66D35 /* LauncherModels.swift */; };
+		F93C3EE211607625A802C71B /* LauncherLifecycleCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B6DBA7444AE7A0648F46A20 /* LauncherLifecycleCoreTests.swift */; };
+		FB908E88FB10E15448808B5C /* DaemonLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1962E6535909C6C16776B6BE /* DaemonLocator.swift */; };
+		FC92A00B401B3C420568A613 /* LauncherPolicy.json in Resources */ = {isa = PBXBuildFile; fileRef = 6E355645968EDFAC5B1B5CFB /* LauncherPolicy.json */; };
+		FCA85E74ACB83829C18ADCC2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB307F7DB6A04182C800A011 /* ContentView.swift */; };
+		FFB31B3A3565FA9DFF7AB9FB /* LifecycleGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B84E9883BEDFAD8A007F509 /* LifecycleGeneration.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		06B55606B4160A83E5029636 /* DaemonLaunchEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonLaunchEnvironment.swift; sourceTree = "<group>"; };
+		0D0B2E5104690BB13F020BE7 /* RuntimePairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimePairing.swift; sourceTree = "<group>"; };
+		1352ACB147F3357122CD0F7C /* DaemonCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonCommand.swift; sourceTree = "<group>"; };
+		1962E6535909C6C16776B6BE /* DaemonLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonLocator.swift; sourceTree = "<group>"; };
+		25F75ECBA28DB63231A0EB15 /* DaemonLaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonLaunchPlan.swift; sourceTree = "<group>"; };
+		272E92B2937A874EBC76301D /* LauncherPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherPolicy.swift; sourceTree = "<group>"; };
+		2FFF02DAB5DB24357215CECE /* LauncherSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherSettings.swift; sourceTree = "<group>"; };
+		3CE63613E1EE787BE2292951 /* QRCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeView.swift; sourceTree = "<group>"; };
+		4258AAD5372136867418E90D /* DaemonConfigurationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConfigurationStore.swift; sourceTree = "<group>"; };
+		49250838FAF8D74581891070 /* DaemonHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonHTTPClient.swift; sourceTree = "<group>"; };
+		4B84E9883BEDFAD8A007F509 /* LifecycleGeneration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifecycleGeneration.swift; sourceTree = "<group>"; };
+		5B808BDD3D2A926B50205B31 /* GenericPasswordStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericPasswordStore.swift; sourceTree = "<group>"; };
+		65786D04A1E6BDBE35224CF5 /* ProductIdentifiers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductIdentifiers.swift; sourceTree = "<group>"; };
+		67E031C4D15093A02D91E1F2 /* DaemonControllerSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonControllerSupportTests.swift; sourceTree = "<group>"; };
+		6E355645968EDFAC5B1B5CFB /* LauncherPolicy.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = LauncherPolicy.json; sourceTree = "<group>"; };
+		70041BD33941230E7C26BA1E /* LocalDaemonEndpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDaemonEndpoint.swift; sourceTree = "<group>"; };
+		7CEE36C26138FD2089A66D35 /* LauncherModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherModels.swift; sourceTree = "<group>"; };
+		8B6DBA7444AE7A0648F46A20 /* LauncherLifecycleCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherLifecycleCoreTests.swift; sourceTree = "<group>"; };
+		8C2B08DF7F1D4CF8B90290E9 /* ManagedDaemonProcess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedDaemonProcess.swift; sourceTree = "<group>"; };
+		8EB31E91665016CD0912E4F9 /* GenericPasswordStorePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericPasswordStorePolicyTests.swift; sourceTree = "<group>"; };
+		8FEEC5B3FF3BDDC8443D288F /* AnyAICLIRemoteLauncherApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyAICLIRemoteLauncherApp.swift; sourceTree = "<group>"; };
+		906F7634B02ED16DBC854E95 /* AnyAICLIRemoteLauncherTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AnyAICLIRemoteLauncherTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9CEA5C6CDA9CEBFF88894126 /* LauncherPreferenceKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherPreferenceKeys.swift; sourceTree = "<group>"; };
+		ADDFD954D82ACE8CDAD7D7FC /* CanonicalDaemonConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalDaemonConfiguration.swift; sourceTree = "<group>"; };
+		BD848EFD237EDA597843610B /* AnyAICLIRemoteLauncher.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnyAICLIRemoteLauncher.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D8F83379EDA6748B3590AB81 /* LauncherLogBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LauncherLogBuffer.swift; sourceTree = "<group>"; };
+		E4174888F5E649FAA18F2482 /* DaemonControllerError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonControllerError.swift; sourceTree = "<group>"; };
+		E4177EA03ED5F9619B472CB1 /* DaemonConfigurationPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConfigurationPath.swift; sourceTree = "<group>"; };
+		EB92841A6C86AD946F971F5D /* AnyAICLIRemoteLauncher.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AnyAICLIRemoteLauncher.entitlements; sourceTree = "<group>"; };
+		ED3281B80B1D3C057A1ACA8C /* PairingSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSecretStore.swift; sourceTree = "<group>"; };
+		F6E7A68AD5E3D1794295F478 /* DaemonConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConfigurationTests.swift; sourceTree = "<group>"; };
+		F76D88AA9A9592134AA3C819 /* DaemonConfigurationMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConfigurationMigration.swift; sourceTree = "<group>"; };
+		F82394DCB0D35135EFFF4626 /* DaemonController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonController.swift; sourceTree = "<group>"; };
+		FB307F7DB6A04182C800A011 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		07506191F11286039A3D2B6D /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				5B808BDD3D2A926B50205B31 /* GenericPasswordStore.swift */,
+			);
+			name = Shared;
+			path = ../apple/Shared;
+			sourceTree = "<group>";
+		};
+		28199FE00D0A60F93C84873B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				BD848EFD237EDA597843610B /* AnyAICLIRemoteLauncher.app */,
+				906F7634B02ED16DBC854E95 /* AnyAICLIRemoteLauncherTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		3B99966D011AFBED0CC05B5C /* LauncherCore */ = {
+			isa = PBXGroup;
+			children = (
+				ADDFD954D82ACE8CDAD7D7FC /* CanonicalDaemonConfiguration.swift */,
+				1352ACB147F3357122CD0F7C /* DaemonCommand.swift */,
+				F76D88AA9A9592134AA3C819 /* DaemonConfigurationMigration.swift */,
+				E4177EA03ED5F9619B472CB1 /* DaemonConfigurationPath.swift */,
+				4258AAD5372136867418E90D /* DaemonConfigurationStore.swift */,
+				49250838FAF8D74581891070 /* DaemonHTTPClient.swift */,
+				06B55606B4160A83E5029636 /* DaemonLaunchEnvironment.swift */,
+				25F75ECBA28DB63231A0EB15 /* DaemonLaunchPlan.swift */,
+				272E92B2937A874EBC76301D /* LauncherPolicy.swift */,
+				9CEA5C6CDA9CEBFF88894126 /* LauncherPreferenceKeys.swift */,
+				70041BD33941230E7C26BA1E /* LocalDaemonEndpoint.swift */,
+			);
+			path = LauncherCore;
+			sourceTree = "<group>";
+		};
+		500EE0A69AF01984EA3010BE /* AnyAICLIRemoteLauncher */ = {
+			isa = PBXGroup;
+			children = (
+				EB92841A6C86AD946F971F5D /* AnyAICLIRemoteLauncher.entitlements */,
+				8FEEC5B3FF3BDDC8443D288F /* AnyAICLIRemoteLauncherApp.swift */,
+				FB307F7DB6A04182C800A011 /* ContentView.swift */,
+				F82394DCB0D35135EFFF4626 /* DaemonController.swift */,
+				E4174888F5E649FAA18F2482 /* DaemonControllerError.swift */,
+				1962E6535909C6C16776B6BE /* DaemonLocator.swift */,
+				D8F83379EDA6748B3590AB81 /* LauncherLogBuffer.swift */,
+				7CEE36C26138FD2089A66D35 /* LauncherModels.swift */,
+				2FFF02DAB5DB24357215CECE /* LauncherSettings.swift */,
+				4B84E9883BEDFAD8A007F509 /* LifecycleGeneration.swift */,
+				8C2B08DF7F1D4CF8B90290E9 /* ManagedDaemonProcess.swift */,
+				ED3281B80B1D3C057A1ACA8C /* PairingSecretStore.swift */,
+				65786D04A1E6BDBE35224CF5 /* ProductIdentifiers.swift */,
+				3CE63613E1EE787BE2292951 /* QRCodeView.swift */,
+				0D0B2E5104690BB13F020BE7 /* RuntimePairing.swift */,
+			);
+			path = AnyAICLIRemoteLauncher;
+			sourceTree = "<group>";
+		};
+		53E0937478C1953186D0033F /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				6E355645968EDFAC5B1B5CFB /* LauncherPolicy.json */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		7152F404E9AFCF944D4B2FB1 /* AnyAICLIRemoteLauncherTests */ = {
+			isa = PBXGroup;
+			children = (
+				F6E7A68AD5E3D1794295F478 /* DaemonConfigurationTests.swift */,
+				67E031C4D15093A02D91E1F2 /* DaemonControllerSupportTests.swift */,
+				8EB31E91665016CD0912E4F9 /* GenericPasswordStorePolicyTests.swift */,
+				8B6DBA7444AE7A0648F46A20 /* LauncherLifecycleCoreTests.swift */,
+			);
+			path = AnyAICLIRemoteLauncherTests;
+			sourceTree = "<group>";
+		};
+		83615A2345533256B57593F8 /* AppleShared */ = {
+			isa = PBXGroup;
+			children = (
+				07506191F11286039A3D2B6D /* Shared */,
+			);
+			name = AppleShared;
+			sourceTree = "<group>";
+		};
+		F8AD154566A4D22C261F7C37 = {
+			isa = PBXGroup;
+			children = (
+				500EE0A69AF01984EA3010BE /* AnyAICLIRemoteLauncher */,
+				7152F404E9AFCF944D4B2FB1 /* AnyAICLIRemoteLauncherTests */,
+				83615A2345533256B57593F8 /* AppleShared */,
+				3B99966D011AFBED0CC05B5C /* LauncherCore */,
+				53E0937478C1953186D0033F /* Resources */,
+				28199FE00D0A60F93C84873B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		18AB0C5BAB0DC80BA80CBED3 /* AnyAICLIRemoteLauncher */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3CB864388D6124F42E2FCC41 /* Build configuration list for PBXNativeTarget "AnyAICLIRemoteLauncher" */;
+			buildPhases = (
+				A1DC5D639622863CA29C3557 /* Sources */,
+				5DF7165963573E4DF8A78DC8 /* Resources */,
+				B872A9C205D0C9E33739ADAC /* Embed Any AI CLI Remote daemon */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AnyAICLIRemoteLauncher;
+			packageProductDependencies = (
+			);
+			productName = AnyAICLIRemoteLauncher;
+			productReference = BD848EFD237EDA597843610B /* AnyAICLIRemoteLauncher.app */;
+			productType = "com.apple.product-type.application";
+		};
+		7B46BC1DD5D922BF3A79EDA9 /* AnyAICLIRemoteLauncherTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7DF3228043B676BA70938BD5 /* Build configuration list for PBXNativeTarget "AnyAICLIRemoteLauncherTests" */;
+			buildPhases = (
+				933FFAEBA58F8BB17656374C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AnyAICLIRemoteLauncherTests;
+			packageProductDependencies = (
+			);
+			productName = AnyAICLIRemoteLauncherTests;
+			productReference = 906F7634B02ED16DBC854E95 /* AnyAICLIRemoteLauncherTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B1C7BBE68B63AC13D518C53E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					18AB0C5BAB0DC80BA80CBED3 = {
+						DevelopmentTeam = "";
+					};
+					7B46BC1DD5D922BF3A79EDA9 = {
+						DevelopmentTeam = "";
+					};
+				};
+			};
+			buildConfigurationList = C3B18F3CAF850F3620718AC9 /* Build configuration list for PBXProject "AnyAICLIRemoteLauncher" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = F8AD154566A4D22C261F7C37;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 28199FE00D0A60F93C84873B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				18AB0C5BAB0DC80BA80CBED3 /* AnyAICLIRemoteLauncher */,
+				7B46BC1DD5D922BF3A79EDA9 /* AnyAICLIRemoteLauncherTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5DF7165963573E4DF8A78DC8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FC92A00B401B3C420568A613 /* LauncherPolicy.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B872A9C205D0C9E33739ADAC /* Embed Any AI CLI Remote daemon */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(PROJECT_DIR)/../dist/any-aicli-remote-daemon",
+			);
+			name = "Embed Any AI CLI Remote daemon";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/any-aicli-remote-daemon",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\ndaemon_source=\"${PROJECT_DIR}/../dist/any-aicli-remote-daemon\"\ndaemon_directory=\"${TARGET_BUILD_DIR}/${EXECUTABLE_FOLDER_PATH}\"\ndaemon_destination=\"${daemon_directory}/any-aicli-remote-daemon\"\n\nif [[ ! -x \"${daemon_source}\" ]]; then\n  echo \"error: missing executable daemon at ${daemon_source}\" >&2\n  exit 1\nfi\n\n/bin/mkdir -p \"${daemon_directory}\"\n/usr/bin/ditto \"${daemon_source}\" \"${daemon_destination}\"\n/bin/chmod 0755 \"${daemon_destination}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		933FFAEBA58F8BB17656374C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3022DCF426ECEB2C1F246909 /* CanonicalDaemonConfiguration.swift in Sources */,
+				9EECF95690108FCD92141E61 /* DaemonCommand.swift in Sources */,
+				9E584B6A1C83701FBDCF7A29 /* DaemonConfigurationMigration.swift in Sources */,
+				73E1DB39EE8E45C4A232C576 /* DaemonConfigurationPath.swift in Sources */,
+				19A807658CE47EA9A718F081 /* DaemonConfigurationStore.swift in Sources */,
+				897D4EE930D108C606A9B1D1 /* DaemonConfigurationTests.swift in Sources */,
+				CAF366965BF5E31B37E31BFC /* DaemonControllerError.swift in Sources */,
+				64F3F8253C4786B427E04E96 /* DaemonControllerSupportTests.swift in Sources */,
+				B929BC335297833CB8F251C7 /* DaemonHTTPClient.swift in Sources */,
+				A9E614E4B959A777992AADA3 /* DaemonLaunchEnvironment.swift in Sources */,
+				E887806DD7A2F9D81E68C01B /* DaemonLaunchPlan.swift in Sources */,
+				FB908E88FB10E15448808B5C /* DaemonLocator.swift in Sources */,
+				BABF3121E449C50C004F0E45 /* GenericPasswordStore.swift in Sources */,
+				B39C39974CF8BD5BFE57CCDC /* GenericPasswordStorePolicyTests.swift in Sources */,
+				F93C3EE211607625A802C71B /* LauncherLifecycleCoreTests.swift in Sources */,
+				9216278B9133E024B73B2184 /* LauncherLogBuffer.swift in Sources */,
+				EC8BAA3511942BD6F00FE1BA /* LauncherModels.swift in Sources */,
+				8208C0B45FC6A3DB05B0B956 /* LauncherPolicy.swift in Sources */,
+				38E24949EE56D243CC6121D7 /* LauncherPreferenceKeys.swift in Sources */,
+				D5FDA0CACFC70AE37836B9B9 /* LauncherSettings.swift in Sources */,
+				1669C1E5C18B707C9FA47344 /* LifecycleGeneration.swift in Sources */,
+				AE725EB9C1DF8F86639F71F7 /* LocalDaemonEndpoint.swift in Sources */,
+				70C897D15E1F0F9EB2350DD7 /* ProductIdentifiers.swift in Sources */,
+				9B72EE1ED3F868915C9C5097 /* RuntimePairing.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1DC5D639622863CA29C3557 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				84397E06655B6820637FFC72 /* AnyAICLIRemoteLauncherApp.swift in Sources */,
+				023F6741D113871F964E98DE /* CanonicalDaemonConfiguration.swift in Sources */,
+				FCA85E74ACB83829C18ADCC2 /* ContentView.swift in Sources */,
+				2893D76EB1BFED124267B996 /* DaemonCommand.swift in Sources */,
+				D9C2233062F877FC65EA2FE8 /* DaemonConfigurationMigration.swift in Sources */,
+				4479E0B7CC30F3FC15E8AF25 /* DaemonConfigurationPath.swift in Sources */,
+				E76D305A76C2FB2F1C453B05 /* DaemonConfigurationStore.swift in Sources */,
+				0306E4D7931EF6168C3686BB /* DaemonController.swift in Sources */,
+				7BA8EA19449C989FAAA799EC /* DaemonControllerError.swift in Sources */,
+				E9DF5144873BB05CE949E9C6 /* DaemonHTTPClient.swift in Sources */,
+				8152D9D4E12EAFB42ED0B638 /* DaemonLaunchEnvironment.swift in Sources */,
+				22403FEA418E637050A9CE86 /* DaemonLaunchPlan.swift in Sources */,
+				1ECC994FDC0F4E93E8A74989 /* DaemonLocator.swift in Sources */,
+				509C07CE028CF675FBCD420F /* GenericPasswordStore.swift in Sources */,
+				EC743F0768CDE27B0556D010 /* LauncherLogBuffer.swift in Sources */,
+				79277DD15396549F6EB247EA /* LauncherModels.swift in Sources */,
+				1A389ECBFEE0EA1839C18E2F /* LauncherPolicy.swift in Sources */,
+				4D66C1AA3EF6CBF6C8F3C0BD /* LauncherPreferenceKeys.swift in Sources */,
+				B222BC89FB945EBB49D6059E /* LauncherSettings.swift in Sources */,
+				FFB31B3A3565FA9DFF7AB9FB /* LifecycleGeneration.swift in Sources */,
+				B0BCA1874B804155DA4063AD /* LocalDaemonEndpoint.swift in Sources */,
+				DF3FF7FED376CB6F5DE4FA3E /* ManagedDaemonProcess.swift in Sources */,
+				26838749E3035C224E96D044 /* PairingSecretStore.swift in Sources */,
+				5AD9978E9B19B721D89C98DC /* ProductIdentifiers.swift in Sources */,
+				79F4BC0CA345E3FB74D234BA /* QRCodeView.swift in Sources */,
+				6F0699497BCC8CB970999CA8 /* RuntimePairing.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		157B00CC072A84BEAC9EB562 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Any AI CLI Remote Launcher";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHighResolutionCapable = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to the local Any AI CLI Remote daemon.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.anyaicliremote.launcher;
+				PRODUCT_MODULE_NAME = AnyAICLIRemoteLauncher;
+				PRODUCT_NAME = "Any AI CLI Remote Launcher";
+				SDKROOT = macosx;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+			};
+			name = Debug;
+		};
+		1C83C1125853908B7D374D24 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Any AI CLI Remote Launcher";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHighResolutionCapable = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to the local Any AI CLI Remote daemon.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.anyaicliremote.launcher;
+				PRODUCT_MODULE_NAME = AnyAICLIRemoteLauncher;
+				PRODUCT_NAME = "Any AI CLI Remote Launcher";
+				SDKROOT = macosx;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+			};
+			name = Release;
+		};
+		4E6E5775AC8F6C520874ECA2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEPLOYMENT_POSTPROCESSING = YES;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_SWIFT_FLAGS = "$(inherited) -file-prefix-map $(PROJECT_DIR)=. -debug-prefix-map $(PROJECT_DIR)=.";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRIP_INSTALLED_PRODUCT = YES;
+				STRIP_STYLE = all;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		7C0CB3F4D2E47BB9DE8B15A8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_SWIFT_FLAGS = "$(inherited) -file-prefix-map $(PROJECT_DIR)=. -debug-prefix-map $(PROJECT_DIR)=.";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		8240A24FC9661BAB4BA677A0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.anyaicliremote.launcher.tests;
+				SDKROOT = macosx;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+			};
+			name = Debug;
+		};
+		D746ED63D70C6FC8B266919C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.anyaicliremote.launcher.tests;
+				SDKROOT = macosx;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3CB864388D6124F42E2FCC41 /* Build configuration list for PBXNativeTarget "AnyAICLIRemoteLauncher" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				157B00CC072A84BEAC9EB562 /* Debug */,
+				1C83C1125853908B7D374D24 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7DF3228043B676BA70938BD5 /* Build configuration list for PBXNativeTarget "AnyAICLIRemoteLauncherTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8240A24FC9661BAB4BA677A0 /* Debug */,
+				D746ED63D70C6FC8B266919C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C3B18F3CAF850F3620718AC9 /* Build configuration list for PBXProject "AnyAICLIRemoteLauncher" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7C0CB3F4D2E47BB9DE8B15A8 /* Debug */,
+				4E6E5775AC8F6C520874ECA2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B1C7BBE68B63AC13D518C53E /* Project object */;
+}

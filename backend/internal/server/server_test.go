@@ -175,6 +175,21 @@ func TestServerRemoteAuthAndConfig(testingContext *testing.T) {
 	if body["agent_port"] != float64(35419) {
 		testingContext.Fatalf("agent port = %#v", body["agent_port"])
 	}
+	if body["pairing_url"] != fixture.server.configuration.PairingURL(fixture.server.lanIP) {
+		testingContext.Fatalf("pairing URL = %#v", body["pairing_url"])
+	}
+	if body["pairing_deep_link"] != fixture.server.configuration.PairingDeepLink(fixture.server.lanIP) {
+		testingContext.Fatalf("pairing deep link = %#v", body["pairing_deep_link"])
+	}
+	if !strings.Contains(body["pairing_url"].(string), "?auto=1&key="+routeTestSecret) {
+		testingContext.Fatalf("pairing URL does not contain expected key: %#v", body["pairing_url"])
+	}
+	configJSON := fixture.request(testingContext, http.MethodGet, "/config.json", nil, remotePeer, true)
+	assertStatus(testingContext, configJSON, http.StatusOK)
+	configJSONBody := decodeObject(testingContext, configJSON)
+	if configJSONBody["pairing_url"] != body["pairing_url"] || configJSONBody["pairing_deep_link"] != body["pairing_deep_link"] {
+		testingContext.Fatalf("config.json pairing payload = %#v", configJSONBody)
+	}
 	if len(response.Result().Cookies()) != 1 {
 		testingContext.Fatalf("authorized config cookies = %#v", response.Result().Cookies())
 	}
@@ -188,7 +203,7 @@ func TestPersistedRuntimeConfigContainsNoPairingMaterial(testingContext *testing
 		testingContext.Fatal(errorValue)
 	}
 	contents := string(data)
-	if strings.Contains(contents, routeTestSecret) || strings.Contains(contents, "?key=") || strings.Contains(contents, `"ui"`) || strings.Contains(contents, `"watch"`) {
+	if strings.Contains(contents, routeTestSecret) || strings.Contains(contents, "?key=") || strings.Contains(contents, `"pairing_url"`) || strings.Contains(contents, `"pairing_deep_link"`) || strings.Contains(contents, `"ui"`) || strings.Contains(contents, `"watch"`) {
 		testingContext.Fatalf("runtime config persisted pairing material: %s", contents)
 	}
 	info, errorValue := os.Stat(path)
