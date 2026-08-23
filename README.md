@@ -185,6 +185,46 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 新应用；系统不允许新包直接读取旧包的私有沙箱。仓库内的偏好迁移覆盖同一沙箱可访问的
 旧格式，真正跨 applicationId 的已安装数据迁移需要旧版本先提供显式导出通道。
 
+## 原生客户端验收
+
+统一验收入口按 **Android first → iOS** 顺序执行：先运行 Android 单元测试、Debug 构建和
+lint，再生成 iOS 工程、执行未签名 generic simulator 构建，最后在具体 Simulator 上运行
+签名测试。Android connected E2E 默认不运行；需要设备时显式 opt-in：
+
+```bash
+./scripts/android-connected-e2e.sh
+
+cd ios
+xcodegen generate
+xcodebuild -project AnyAICLIRemote.xcodeproj -scheme AnyAICLIRemote \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project AnyAICLIRemote.xcodeproj -scheme AnyAICLIRemote \
+  -destination 'platform=iOS Simulator,id=<simulator-id>' test
+```
+
+完整入口示例：
+
+```bash
+RUN_ANDROID_CONNECTED_E2E=1 \
+IOS_SIMULATOR_DESTINATION='platform=iOS Simulator,id=<simulator-id>' \
+./scripts/build-all.sh
+```
+
+不设置 `RUN_ANDROID_CONNECTED_E2E=1` 时，`build-all.sh` 不会连接设备运行 Android E2E。
+iOS 测试使用本地 Simulator 签名以访问 Keychain；Release signing 仍属于最终发布流程。
+
+需要验收真实 daemon 的 iOS UI 流程时，先将可信 Launcher 的 pairing key 放入 Simulator
+剪贴板，再使用专用 scheme：
+
+```bash
+xcodebuild -project ios/AnyAICLIRemote.xcodeproj \
+  -scheme AnyAICLIRemoteLiveE2E \
+  -destination 'platform=iOS Simulator,id=<simulator-id>' \
+  -only-testing:AnyAICLIRemoteUITests test
+```
+
+正常 `AnyAICLIRemote` scheme 不注入 live 测试开关，因此不会运行真实 daemon 用例。
+
 ## License
 
 最终开源许可证尚未确定；当前 [`LICENSE`](LICENSE) 仅记录占位状态。

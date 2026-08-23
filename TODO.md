@@ -28,9 +28,9 @@ then include the checkbox update in that feature's commit.
   - [x] This item must not modify or validate Android or iOS; freeze the backend+Launcher E2E contract before clients begin.
   - Commit: `🧪 后端：验证 Grok 与启动器生命周期`
 
-- [ ] **4. 原生客户端功能与 E2E**
-  - [ ] Begin only after items 0–3 are completed, checked off, committed, and the protocol contract is frozen. Android first: unit/debug/lint plus connected-device E2E; iOS afterward: unsigned simulator build/tests.
-  - [ ] Cover multi-device persistent pairing, disconnected-device navigation, session workspaces, history, streaming/cancel/permission/reconnect, rich-text/file behavior, and current brand naming.
+- [x] **4. 原生客户端功能与 E2E**
+  - [x] Begin only after items 0–3 are completed, checked off, committed, and the protocol contract is frozen. Android first: unit/debug/lint plus connected-device E2E; iOS afterward: unsigned simulator build/tests.
+  - [x] Cover multi-device persistent pairing, disconnected-device navigation, session workspaces, history, streaming/cancel/permission/reconnect, rich-text/file behavior, and current brand naming.
   - Commit: `✨ 客户端：完成原生端功能与联调`
 
 - [ ] **5. 子 Agent 实时卡片**

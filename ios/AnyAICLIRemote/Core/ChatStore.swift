@@ -38,6 +38,31 @@ final class ChatStore: ObservableObject {
     private static let devicesDefaultsKey = "savedDevices.v1"
     private static let keychainAccountPrefix = "pairing-key."
 
+    #if DEBUG
+    static func resetStorageForUITesting() {
+        let defaults = UserDefaults.standard
+        let legacyDomain = defaults.persistentDomain(forName: LegacyCompatibility.bundleIdentifier) ?? [:]
+        var deviceIDs = Set<UUID>()
+        let storedDeviceData = [
+            defaults.data(forKey: devicesDefaultsKey),
+            legacyDomain[devicesDefaultsKey] as? Data
+        ].compactMap { $0 }
+        for deviceData in storedDeviceData {
+            if let savedDevices = try? JSONDecoder().decode([SavedDevice].self, from: deviceData) {
+                deviceIDs.formUnion(savedDevices.map(\.id))
+            }
+        }
+        for deviceID in deviceIDs {
+            try? KeychainStore.delete(account: keychainAccount(for: deviceID))
+        }
+        try? KeychainStore.delete(account: "pairing-key")
+        defaults.removeObject(forKey: devicesDefaultsKey)
+        defaults.removeObject(forKey: "serverAddress")
+        defaults.removeObject(forKey: "defaultCwd")
+        defaults.removePersistentDomain(forName: LegacyCompatibility.bundleIdentifier)
+    }
+    #endif
+
     init(healthProbe: DeviceHealthProbe? = nil, runtimeConfiguration: ClientRuntimeConfiguration = ClientRuntimeConfiguration()) {
         self.runtimeConfiguration = runtimeConfiguration
         client = AnyAICLIRemoteClient(runtimeConfiguration: runtimeConfiguration)
@@ -589,12 +614,7 @@ final class ChatStore: ObservableObject {
               let context = currentSessionContext(sessionIdentity: sessionIdentity) else { return }
         Task {
             guard ownsSession(context) else { return }
-            let outcome: [String: Any]
-            if let optionID {
-                outcome = ["outcome": ["outcome": "selected", "optionId": optionID]]
-            } else {
-                outcome = ["outcome": ["outcome": "cancelled"]]
-            }
+            let outcome = Self.permissionReplyResult(optionID: optionID)
             try? await client.reply(id: rpcID, result: outcome)
             guard !Task.isCancelled, ownsSession(context) else { return }
             blocks.removeAll { $0.id == blockID }
@@ -731,6 +751,11 @@ final class ChatStore: ObservableObject {
     private func matchesSelectedSession(_ params: [String: Any]) -> Bool {
         guard let selectedSession else { return false }
         return Self.matchesSessionIdentity(params, expected: selectedSession.id)
+    }
+
+    nonisolated static func permissionReplyResult(optionID: String?) -> [String: Any] {
+        if let optionID { return ["outcome": ["outcome": "selected", "optionId": optionID]] }
+        return ["outcome": ["outcome": "cancelled"]]
     }
 
     nonisolated static func matchesSessionIdentity(
@@ -893,7 +918,7 @@ final class ChatStore: ObservableObject {
         selectedSession = session
     }
 
-    private static func chatBlocks(from messages: [[String: Any]]) -> [ChatBlock] {
+    nonisolated static func chatBlocks(from messages: [[String: Any]]) -> [ChatBlock] {
         messages.enumerated().compactMap { messageIndex, message in
             guard let role = message.string("role")?.lowercased(),
                   let content = message.string("content") else { return nil }

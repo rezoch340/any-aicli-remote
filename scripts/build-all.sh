@@ -41,6 +41,17 @@ resolve_ios_test_destination() {
 echo "==> Go backend quality and macOS launcher build"
 "$PROJECT_ROOT/scripts/build-macos-app.sh"
 
+echo "==> Android unit tests, debug build, and lint"
+"$PROJECT_ROOT/android/gradlew" -p "$PROJECT_ROOT/android" \
+  :app:testDebugUnitTest \
+  :app:assembleDebug \
+  :app:lintDebug
+
+if [[ "${RUN_ANDROID_CONNECTED_E2E:-0}" == "1" ]]; then
+  echo "==> Android connected E2E"
+  "$PROJECT_ROOT/scripts/android-connected-e2e.sh"
+fi
+
 if ! command -v xcodegen >/dev/null 2>&1; then
   echo "error: required tool not found: xcodegen" >&2
   exit 1
@@ -68,9 +79,3 @@ xcodebuild \
   -scheme "$IOS_SCHEME" \
   -destination "$IOS_TEST_DESTINATION" \
   test
-
-echo "==> Android unit tests, debug build, and lint"
-"$PROJECT_ROOT/android/gradlew" -p "$PROJECT_ROOT/android" \
-  :app:testDebugUnitTest \
-  :app:assembleDebug \
-  :app:lintDebug

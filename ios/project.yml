@@ -20,6 +20,18 @@ packages:
   SwiftStreamingMarkdown:
     url: https://github.com/microsoft/SwiftStreamingMarkdown
     revision: c7b12f7b3d77caa188fd1fc056d0f7ce305ef5cd
+schemes:
+  AnyAICLIRemoteLiveE2E:
+    shared: true
+    build:
+      targets:
+        AnyAICLIRemote: all
+    test:
+      config: Debug
+      targets:
+        - AnyAICLIRemoteUITests
+      environmentVariables:
+        ANY_AI_CLI_REMOTE_LIVE_UI_TEST: "1"
 targets:
   AnyAICLIRemote:
     type: application
