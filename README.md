@@ -187,4 +187,4 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 ## License
 
-[MIT](LICENSE)
+最终开源许可证尚未确定；当前 [`LICENSE`](LICENSE) 仅记录占位状态。
