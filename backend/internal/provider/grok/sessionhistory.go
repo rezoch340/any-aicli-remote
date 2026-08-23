@@ -53,8 +53,8 @@ func (providerInstance *GrokProvider) LoadMessages(operationContext context.Cont
 		default:
 			continue
 		}
-		content := providerapi.ExtractText(record["content"])
-		if strings.TrimSpace(content) == "" {
+		content, conversational := conversationMessage(role, providerapi.ExtractText(record["content"]))
+		if !conversational {
 			continue
 		}
 		timestamp := providerapi.ParseTimestampMilliseconds(record["timestamp"])
