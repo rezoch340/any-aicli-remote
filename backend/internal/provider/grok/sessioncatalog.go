@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -167,32 +166,4 @@ func (providerInstance *GrokProvider) RenameSession(operationContext context.Con
 		return providerapi.RenameResult{}, operationError
 	}
 	return providerapi.RenameResult{SessionID: sessionID, Title: title, PreviousTitle: previousTitle, SourcePath: access.sourcePath}, nil
-}
-
-func firstString(mapping map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value := strings.TrimSpace(stringValue(mapping[key])); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func stringValue(value any) string {
-	if value == nil {
-		return ""
-	}
-	if text, valid := value.(string); valid {
-		return text
-	}
-	return fmt.Sprint(value)
-}
-
-func truncate(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
-	}
-	return string(runes[:limit]) + "..."
 }
