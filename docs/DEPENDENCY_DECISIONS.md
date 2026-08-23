@@ -344,3 +344,17 @@ is macOS and Linux; renameio's documented platform support does not include Wind
 - Chosen: Apple VisionKit `DataScannerViewController` (iOS 17), restricted to QR symbologies.
 - Decision: use the system scanner UI and availability checks rather than adding a third-party or custom
   AVFoundation scanner; this keeps camera handling within Apple frameworks and limits the feature to pairing payloads.
+
+## Android static analysis
+
+- Checked Detekt 2.0 alpha releases and the stable Detekt 1.23.8 release. Given this project's Kotlin 2.1,
+  AGP 8.7, and Gradle 8.11 toolchain, choose stable `io.gitlab.arturbosch.detekt` 1.23.8.
+- Decision: run Detekt for production and test Kotlin sources with zero allowed issues. Rules cover Kotlin AST
+  quality (including size, complexity, line length, and identifier naming); do not add a self-written Kotlin parser.
+- Boundary: this gate is quality analysis only and must not replace compiler, Android lint, or business behavior checks.
+
+## SwiftLint native source quality
+
+- Chosen: `SimplyDanny/SwiftLintPlugins` exact `0.65.0`, using its pinned `SwiftLintCommandPlugin` binary. The tooling package intentionally has no source targets; `Package.resolved` records the exact dependency and artifact revision.
+- Decision: run one command-plugin invocation over `ios` and `apple/Shared` with strict zero-issue configuration. The repository script also enforces a 600-physical-line ceiling for production Kotlin and Swift files without implementing a language parser.
+- Boundary: an Xcode build-tool plugin is not used because the target's `../apple/Shared` sources are outside the project directory and the upstream plugin documents that working-directory limitation. Generated Xcode projects and DerivedData are excluded; this gate does not replace compiler or platform analysis.

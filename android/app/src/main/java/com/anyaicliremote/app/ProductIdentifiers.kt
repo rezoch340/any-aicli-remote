@@ -1,5 +1,7 @@
 package com.anyaicliremote.app
 
+import com.anyaicliremote.core.remote.ClientProductConfiguration
+
 internal object ProductIdentifiers {
     val displayName: String = BuildConfig.PRODUCT_DISPLAY_NAME
     val pairingScheme: String = BuildConfig.PRODUCT_PAIRING_SCHEME
@@ -7,6 +9,17 @@ internal object ProductIdentifiers {
     val profilePreferencesName: String = BuildConfig.PRODUCT_PREFERENCES_NAME
     val clientName: String = BuildConfig.PRODUCT_CLIENT_NAME
     val clientVersion: String = BuildConfig.VERSION_NAME
+    val profileStorageConfiguration: com.anyaicliremote.core.storage.ProfileStorageConfiguration
+        get() = com.anyaicliremote.core.storage.ProfileStorageConfiguration(
+            preferencesName = profilePreferencesName,
+            legacyPreferencesName = LegacyCompatibility.profilePreferencesName,
+            legacyDisplayName = LegacyCompatibility.displayName,
+            legacyBaseURLKey = LegacyCompatibility.legacyBaseURLKey,
+            legacyPairingKey = LegacyCompatibility.legacyPairingKey,
+            legacyDefaultWorkingDirectoryKey = LegacyCompatibility.legacyDefaultWorkingDirectoryKey,
+        )
+    val clientConfiguration: ClientProductConfiguration
+        get() = ClientProductConfiguration(authorizationHeader, clientName, clientVersion)
 }
 
 internal object LegacyCompatibility {

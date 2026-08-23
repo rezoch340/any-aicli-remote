@@ -1,5 +1,5 @@
 import XCTest
-@testable import AnyAICLIRemote
+@testable import AnyAICLIRemoteCore
 
 final class RESTPathEncodingTests: XCTestCase {
     func testSessionIdentifierIsEncodedAsOnePathSegment() throws {

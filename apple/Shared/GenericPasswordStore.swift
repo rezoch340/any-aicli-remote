@@ -117,7 +117,7 @@ enum GenericPasswordStore {
         let matchQuery = query(for: location, usesDataProtection: usesDataProtection)
         let updatedAttributes: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
         let updateStatus = SecItemUpdate(
             matchQuery as CFDictionary,
@@ -187,7 +187,7 @@ enum GenericPasswordStore {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: location.service,
-            kSecAttrAccount as String: location.account,
+            kSecAttrAccount as String: location.account
         ]
         if usesDataProtection {
             // Apple recommends the data-protection keychain for portable SecItem behavior.

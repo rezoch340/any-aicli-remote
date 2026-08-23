@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "AnyAICLIRemote"
-include(":app")
+include(":app", ":feature:ui", ":core:model", ":core:remote", ":core:storage", ":core:session", ":core:chat")

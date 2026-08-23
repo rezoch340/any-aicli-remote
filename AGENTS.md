@@ -22,6 +22,9 @@
 - There must be one shared implementation for each cross-provider concern, including registry behavior, session metadata, canonical path containment, timestamp normalization, pagination, connection generations, and compatibility migration.
 - Adapters contain only provider-specific behavior. If code does not depend on a provider's protocol or on-disk format, it does not belong in the adapter.
 - Do not create near-duplicate helpers with different names. Consolidate them and update callers.
+- Prefer real module boundaries during architecture and refactoring: layer cohesive responsibilities such as model, transport, storage, domain, feature, and composition rather than merely splitting files while retaining one monolithic module.
+- Put each shared capability in one owning module and expose the narrow public API required by its consumers. Do not scatter or duplicate helpers, protocol parsing, storage, networking, or UI orchestration across modules; consolidate scattered responsibilities before extending them.
+- Avoid over-modularization as well: do not create a fragment module or wrapper without an independent responsibility or a real second caller.
 - Backward-compatibility reads and migrations must be centralized. New writes use only the current Any AI CLI Remote names.
 
 ## Compatibility and open-source hygiene
@@ -40,6 +43,8 @@
 
 - Use descriptive identifiers. New variable and declaration names shorter than three characters fail the quality gate, except established protocol or platform terms such as `ID`, `URL`, `RPC`, `HTTP`, `OS`, `UI`, and `IP`.
 - Hand-written Go source files must not exceed 600 physical lines. A larger file fails the quality gate and must be split by cohesive responsibility within the existing package; comments, regions, generated wrappers, or duplicate helper layers are not substitutes for a real split.
+- Hand-written production Kotlin and Swift source files must not exceed 600 physical lines; Detekt and SwiftLint must report zero issues. Do not use baselines or file-wide suppression; only the narrowest platform-boundary suppression is allowed when accompanied by an explanatory comment.
+- Protocols, mappings, reducers, and compatibility/migration behavior must reuse one canonical implementation rather than parallel copies.
 - Do not wait until a file reaches the hard limit to separate unrelated lifecycle, transport, protocol, persistence, platform, and domain responsibilities. File splitting must preserve one canonical implementation rather than copying shared logic into each file.
 - Magic values and scattered operational defaults are forbidden. Ports, bind or public addresses, executable paths, timeouts, retry or polling intervals, resource limits, retention periods, feature switches, and other deployment- or behavior-tunable values must live in the canonical typed configuration or durable settings store, not inline at call sites.
 - Fixed protocol values and genuine invariants may remain in code only as descriptively named constants. Test fixtures may use literals when the value is part of the scenario and its meaning is clear from the fixture name.

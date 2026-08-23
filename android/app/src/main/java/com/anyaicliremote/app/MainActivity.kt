@@ -11,15 +11,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.anyaicliremote.app.ui.ChatViewModel
+import com.anyaicliremote.feature.ui.ChatViewModel
 import com.anyaicliremote.app.ui.AnyAICLIRemoteRoot
-import com.anyaicliremote.app.ui.theme.AnyAICLIRemoteTheme
+import com.anyaicliremote.feature.ui.theme.AnyAICLIRemoteTheme
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: ChatViewModel by viewModels()
+    private val appComposition by lazy { AppComposition(application) }
+    private val viewModel: ChatViewModel by viewModels { appComposition.viewModelFactory }
     private val pairingCodeScannerOptions by lazy {
         GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_QR_CODE)

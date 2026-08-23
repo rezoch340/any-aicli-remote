@@ -13,9 +13,6 @@ settings:
     ANY_AI_CLI_REMOTE_PRODUCT_PAIRING_SCHEME: anyaicliremote
     ANY_AI_CLI_REMOTE_PRODUCT_AUTHORIZATION_HEADER: X-Any-AI-CLI-Remote-Key
     ANY_AI_CLI_REMOTE_PRODUCT_CLIENT_NAME: any-aicli-remote-app-ios
-    ANY_AI_CLI_REMOTE_LEGACY_PAIRING_SCHEME: grokremote
-    ANY_AI_CLI_REMOTE_LEGACY_AUTHORIZATION_HEADER: X-Grok-Remote-Key
-    ANY_AI_CLI_REMOTE_LEGACY_BUNDLE_IDENTIFIER: com.grokremote.app
 packages:
   SwiftStreamingMarkdown:
     url: https://github.com/microsoft/SwiftStreamingMarkdown
@@ -32,17 +29,44 @@ schemes:
         - AnyAICLIRemoteUITests
       environmentVariables:
         ANY_AI_CLI_REMOTE_LIVE_UI_TEST: "1"
+        ANY_AI_CLI_REMOTE_LIVE_PAIRING_KEY_FILE: $(ANY_AI_CLI_REMOTE_LIVE_PAIRING_KEY_FILE)
 targets:
+  AnyAICLIRemoteCore:
+    type: framework
+    platform: iOS
+    sources:
+      - AnyAICLIRemoteCore
+      - path: ../apple/Shared
+        group: AppleShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ANY_AI_CLI_REMOTE_PRODUCT_BUNDLE_IDENTIFIER).core
+        PRODUCT_MODULE_NAME: AnyAICLIRemoteCore
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+  AnyAICLIRemoteFeature:
+    type: framework
+    platform: iOS
+    sources:
+      - AnyAICLIRemoteFeature
+    dependencies:
+      - target: AnyAICLIRemoteCore
+      - package: SwiftStreamingMarkdown
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ANY_AI_CLI_REMOTE_PRODUCT_BUNDLE_IDENTIFIER).feature
+        PRODUCT_MODULE_NAME: AnyAICLIRemoteFeature
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
   AnyAICLIRemote:
     type: application
     platform: iOS
     productName: Any AI CLI Remote
     sources:
-      - AnyAICLIRemote
-      - path: ../apple/Shared
-        group: AppleShared
+      - AnyAICLIRemote/App
     dependencies:
-      - package: SwiftStreamingMarkdown
+      - target: AnyAICLIRemoteCore
+      - target: AnyAICLIRemoteFeature
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(ANY_AI_CLI_REMOTE_PRODUCT_BUNDLE_IDENTIFIER)
@@ -50,7 +74,6 @@ targets:
         PRODUCT_MODULE_NAME: AnyAICLIRemote
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: AnyAICLIRemote/Info.plist
-        CODE_SIGN_ENTITLEMENTS: AnyAICLIRemote/AnyAICLIRemote.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
@@ -62,21 +85,25 @@ targets:
   AnyAICLIRemoteTests:
     type: bundle.unit-test
     platform: iOS
-    sources:
-      - AnyAICLIRemoteTests
+    sources: [AnyAICLIRemoteTests]
     dependencies:
-      - target: AnyAICLIRemote
+      - target: AnyAICLIRemoteCore
+      - target: AnyAICLIRemoteFeature
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(ANY_AI_CLI_REMOTE_PRODUCT_BUNDLE_IDENTIFIER).tests
-        GENERATE_INFOPLIST_FILE: YES
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: AnyAICLIRemote/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: $(ANY_AI_CLI_REMOTE_PRODUCT_DISPLAY_NAME)
+        INFOPLIST_KEY_AnyAICLIRemoteProductPairingScheme: $(ANY_AI_CLI_REMOTE_PRODUCT_PAIRING_SCHEME)
+        INFOPLIST_KEY_AnyAICLIRemoteProductAuthorizationHeader: $(ANY_AI_CLI_REMOTE_PRODUCT_AUTHORIZATION_HEADER)
+        INFOPLIST_KEY_AnyAICLIRemoteProductClientName: $(ANY_AI_CLI_REMOTE_PRODUCT_CLIENT_NAME)
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
         GCC_TREAT_WARNINGS_AS_ERRORS: YES
   AnyAICLIRemoteUITests:
     type: bundle.ui-testing
     platform: iOS
-    sources:
-      - AnyAICLIRemoteUITests
+    sources: [AnyAICLIRemoteUITests]
     dependencies:
       - target: AnyAICLIRemote
     settings:

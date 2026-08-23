@@ -17,3 +17,4 @@ ios/*.xcodeproj/xcuserdata/
 /initial-stream
 /tool-call
 /tool-call-update
+/tools/swiftlint/.build/

@@ -7,7 +7,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
-import com.anyaicliremote.app.data.SecureProfileStore
+import com.anyaicliremote.core.storage.SecureProfileStore
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.util.UUID
@@ -88,7 +88,7 @@ class PairingPersistenceInstrumentedTest {
         ActivityScenario.launch<MainActivity>(mainIntent()).use {
             assertForeground(it)
 
-            val savedProfiles = SecureProfileStore(applicationContext).loadDevices()
+            val savedProfiles = SecureProfileStore(applicationContext, ProductIdentifiers.profileStorageConfiguration).loadDevices()
             assertEquals(2, savedProfiles.size)
             assertEquals(
                 setOf(currentProfile.address, legacyProfile.address),
@@ -122,7 +122,7 @@ class PairingPersistenceInstrumentedTest {
     }
 
     private fun assertPersisted(profile: ProfileFixture) {
-        val savedProfile = SecureProfileStore(applicationContext).loadDevices()
+        val savedProfile = SecureProfileStore(applicationContext, ProductIdentifiers.profileStorageConfiguration).loadDevices()
             .single { it.name == profile.name }
         assertEquals(profile.address, savedProfile.baseUrl)
     }

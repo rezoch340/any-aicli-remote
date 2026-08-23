@@ -1,9 +1,11 @@
+import Foundation
+import UIKit
 import XCTest
 
 final class DevicePairingUITests: XCTestCase {
     private enum PairingKeyInput {
         case typed(String)
-        case pasteboard
+        case file(path: String)
     }
 
     private let resetArgument = "--ui-testing-reset-storage"
@@ -39,38 +41,38 @@ final class DevicePairingUITests: XCTestCase {
         XCTAssertTrue(application.buttons["手动添加设备"].exists)
     }
 
-    func testOfflineDevicesPersistAndConnectionFailureReturnsToDeviceList() {
+    func testOfflineDevicesPersistAndConnectionFailureReturnsToDeviceList() throws {
         let application = launchApplication()
         XCTAssertTrue(application.buttons["手动添加设备"].waitForExistence(timeout: 5))
         let offlineKeyInput = PairingKeyInput.typed("offline-test-pairing-key")
-        addDevice(
+        try addDevice(
             application: application,
             name: "离线设备一",
             address: "http://127.0.0.1:1",
             pairingKeyInput: offlineKeyInput
         )
-        addDevice(
+        try addDevice(
             application: application,
             name: "离线设备二",
             address: "http://127.0.0.1:2",
             pairingKeyInput: offlineKeyInput
         )
-        let firstOfflineRow = application.buttons
-            .containing(.staticText, identifier: "离线设备一")
-            .firstMatch
-        let secondOfflineRow = application.buttons
-            .containing(.staticText, identifier: "离线设备二")
-            .firstMatch
-        XCTAssertTrue(firstOfflineRow.waitForExistence(timeout: 5))
-        XCTAssertTrue(secondOfflineRow.exists)
+        let firstOfflineRow = deviceButton(application: application, name: "离线设备一")
+        let secondOfflineRow = deviceButton(application: application, name: "离线设备二")
+        let ready = NSPredicate(format: "exists == true AND isHittable == true")
+        try require(expect(firstOfflineRow, matching: ready, timeout: 5), "第一台设备不可操作")
+        try require(expect(secondOfflineRow, matching: ready, timeout: 5), "第二台设备不可操作")
         application.terminate()
         application.launchArguments.removeAll { $0 == resetArgument }
         application.launch()
-        XCTAssertTrue(firstOfflineRow.waitForExistence(timeout: 5))
-        firstOfflineRow.tap()
-        XCTAssertTrue(application.navigationBars["设备"].waitForExistence(timeout: 10))
-        XCTAssertTrue(firstOfflineRow.exists)
-        XCTAssertTrue(secondOfflineRow.exists)
+        let reopenedFirstRow = deviceButton(application: application, name: "离线设备一")
+        let reopenedSecondRow = deviceButton(application: application, name: "离线设备二")
+        try require(reopenedFirstRow.waitForExistence(timeout: 5), "重启后第一台设备未持久化")
+        try require(reopenedSecondRow.waitForExistence(timeout: 5), "重启后第二台设备未持久化")
+        reopenedFirstRow.tap()
+        try require(application.navigationBars["设备"].waitForExistence(timeout: 10), "离线连接后未回到设备页")
+        try require(deviceButton(application: application, name: "离线设备一").exists, "第一台设备丢失")
+        try require(deviceButton(application: application, name: "离线设备二").exists, "第二台设备丢失")
     }
 
     func testPairAndOpenSessionListAgainstLiveDaemon() throws {
@@ -79,23 +81,20 @@ final class DevicePairingUITests: XCTestCase {
         }
 
         let application = launchApplication()
-        addDevice(
+        try addDevice(
             application: application,
             name: "模拟器服务",
             address: "http://127.0.0.1:2421",
-            pairingKeyInput: .pasteboard
+            pairingKeyInput: .file(path: try livePairingKeyFilePath())
         )
-        let dismissPasswordPrompt = application.buttons["以后"]
-        if dismissPasswordPrompt.waitForExistence(timeout: 2) {
-            dismissPasswordPrompt.tap()
-        }
-        let deviceRow = application.buttons
-            .containing(.staticText, identifier: "模拟器服务")
-            .firstMatch
-        XCTAssertTrue(deviceRow.waitForExistence(timeout: 5))
-        deviceRow.tap()
-        XCTAssertTrue(application.navigationBars["模拟器服务"].waitForExistence(timeout: 10))
-        _ = application.staticTexts["在线"].waitForExistence(timeout: 5)
+        application.terminate()
+        application.launchArguments.removeAll { $0 == resetArgument }
+        application.launch()
+        let reopenedDeviceRow = deviceButton(application: application, name: "模拟器服务")
+        try require(reopenedDeviceRow.waitForExistence(timeout: 10), "重启后未找到已配对设备")
+        reopenedDeviceRow.tap()
+        try require(application.navigationBars["模拟器服务"].waitForExistence(timeout: 10), "未进入已配对设备")
+        try require(application.cells.firstMatch.waitForExistence(timeout: 10), "使用已保存 Key 鉴权后未进入会话列表")
     }
 
     func testStreamingResponseAutoScrollAgainstLiveDaemon() throws {
@@ -104,15 +103,13 @@ final class DevicePairingUITests: XCTestCase {
         }
 
         let application = launchApplication()
-        addDevice(
+        try addDevice(
             application: application,
             name: "模拟器服务",
             address: "http://127.0.0.1:2421",
-            pairingKeyInput: .pasteboard
+            pairingKeyInput: .file(path: try livePairingKeyFilePath())
         )
-        let deviceRow = application.buttons
-            .containing(.staticText, identifier: "模拟器服务")
-            .firstMatch
+        let deviceRow = deviceButton(application: application, name: "模拟器服务")
         XCTAssertTrue(deviceRow.waitForExistence(timeout: 10))
         deviceRow.tap()
         XCTAssertTrue(application.navigationBars["模拟器服务"].waitForExistence(timeout: 10))
@@ -143,9 +140,7 @@ final class DevicePairingUITests: XCTestCase {
         application.terminate()
         application.launchArguments.removeAll { $0 == resetArgument }
         application.launch()
-        let reopenedDevice = application.buttons
-            .containing(.staticText, identifier: "模拟器服务")
-            .firstMatch
+        let reopenedDevice = deviceButton(application: application, name: "模拟器服务")
         XCTAssertTrue(reopenedDevice.waitForExistence(timeout: 10))
         reopenedDevice.tap()
         XCTAssertTrue(application.navigationBars["模拟器服务"].waitForExistence(timeout: 10))
@@ -158,49 +153,146 @@ final class DevicePairingUITests: XCTestCase {
         attachScreenshot(named: "session-reopened-at-bottom")
     }
 
+    private func livePairingKeyFilePath() throws -> String {
+        let path = ProcessInfo.processInfo.environment["ANY_AI_CLI_REMOTE_LIVE_PAIRING_KEY_FILE"] ?? ""
+        try require(!path.isEmpty, "未提供 live 配对 Key 文件")
+        return path
+    }
+
     private func addDevice(
         application: XCUIApplication,
         name: String,
         address: String,
         pairingKeyInput: PairingKeyInput
-    ) {
-        XCTAssertTrue(application.navigationBars["设备"].waitForExistence(timeout: 5))
-        let manualButton = application.buttons["手动添加设备"]
-        if manualButton.waitForExistence(timeout: 2) {
-            manualButton.tap()
-        } else {
-            let addButton = application.buttons["添加设备"]
-            XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+    ) throws {
+        try require(application.navigationBars["设备"].waitForExistence(timeout: 5), "设备页未出现")
+        let addButton = application.buttons["添加设备"]
+        if addButton.waitForExistence(timeout: 2) {
             addButton.tap()
-        }
-        XCTAssertTrue(application.navigationBars["添加设备"].waitForExistence(timeout: 5))
-        let nameField = application.textFields["名称（例如：工作室 Mac）"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 5))
-        nameField.tap()
-        nameField.typeText(name)
-        let addressField = application.textFields["http://mac.local:2421"]
-        addressField.tap()
-        addressField.typeText(address)
-        let pairingField = application.secureTextFields["配对 Key"]
-        if case let .typed(pairingKey) = pairingKeyInput {
-            pairingField.tap()
-            pairingField.typeText(pairingKey)
         } else {
-            pairingField.press(forDuration: 1.0)
-            let pasteMenu = application.menuItems["粘贴"]
-            if pasteMenu.waitForExistence(timeout: 2) {
-                pasteMenu.tap()
-            } else {
-                application.menuItems["Paste"].tap()
-            }
+            let manualButton = application.buttons["手动添加设备"]
+            try require(manualButton.waitForExistence(timeout: 5), "手动添加设备按钮未出现")
+            manualButton.tap()
         }
-        application.buttons["保存"].tap()
-        if application.buttons["以后"].waitForExistence(timeout: 2) {
-            application.buttons["以后"].tap()
+        try require(application.navigationBars["添加设备"].waitForExistence(timeout: 5), "添加设备页未出现")
+        let nameField = application.textFields["名称（例如：工作室 Mac）"]
+        try typeAndAwaitValue(nameField, expected: name, fieldName: "名称")
+        let addressField = application.textFields["http://mac.local:2421"]
+        try typeAndAwaitValue(addressField, expected: address, fieldName: "服务地址")
+        let pairingField = application.secureTextFields["配对 Key"]
+        switch pairingKeyInput {
+        case let .typed(pairingKey):
+            try typeAndAwaitSecureValue(pairingField, expected: pairingKey, fieldName: "配对 Key")
+        case let .file(path):
+            let expectedKey = try String(contentsOfFile: path, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            try require(!expectedKey.isEmpty, "配对 Key 文件为空")
+            UIPasteboard.general.string = expectedKey
+            try pasteAndAwaitSecureValue(application: application, field: pairingField, expected: expectedKey)
         }
-        XCTAssertTrue(application.navigationBars["设备"].waitForExistence(timeout: 5))
-        let savedDevice = application.buttons.containing(.staticText, identifier: name).firstMatch
-        XCTAssertTrue(savedDevice.waitForExistence(timeout: 5))
+        let saveButton = application.buttons["保存"]
+        try require(saveButton.waitForExistence(timeout: 5), "保存按钮未出现")
+        try require(saveButton.isEnabled && saveButton.isHittable, "保存按钮不可用或不可点击")
+        saveButton.tap()
+        try dismissPasswordAutofillPromptIfPresent(application: application)
+        let deviceList = application.navigationBars["设备"]
+        let deviceRow = deviceButton(application: application, name: name)
+        let ready = NSPredicate(format: "exists == true AND isHittable == true")
+        try require(expect(deviceList, matching: ready, timeout: 5), "保存后未返回可操作设备页")
+        try require(expect(deviceRow, matching: ready, timeout: 5), "保存后未显示可操作目标设备")
+    }
+
+    private func dismissPasswordAutofillPromptIfPresent(application: XCUIApplication) throws {
+        let localizedButton = application.buttons["以后"]
+        let englishButton = application.buttons["Not Now"]
+        if localizedButton.waitForExistence(timeout: 2), localizedButton.isHittable {
+            localizedButton.tap()
+        } else if englishButton.waitForExistence(timeout: 2), englishButton.isHittable {
+            englishButton.tap()
+        }
+    }
+
+    private func typeAndAwaitValue(
+        _ field: XCUIElement,
+        expected: String,
+        fieldName: String
+    ) throws {
+        try require(field.waitForExistence(timeout: 5), "\(fieldName)输入框未出现")
+        field.tap()
+        field.typeText(expected)
+        let predicate = NSPredicate(format: "value == %@", expected)
+        try require(expect(field, matching: predicate, timeout: 5), "\(fieldName)输入值不完整")
+    }
+
+    private func pasteAndAwaitSecureValue(
+        application: XCUIApplication,
+        field: XCUIElement,
+        expected: String
+    ) throws {
+        try require(field.waitForExistence(timeout: 5), "配对 Key 输入框未出现")
+        let placeholder = field.value as? String
+        field.tap()
+        field.press(forDuration: 1.0)
+        let localizedPaste = application.menuItems["粘贴"]
+        let englishPaste = application.menuItems["Paste"]
+        if localizedPaste.waitForExistence(timeout: 2) {
+            localizedPaste.tap()
+        } else {
+            try require(englishPaste.waitForExistence(timeout: 2), "粘贴菜单未出现")
+            englishPaste.tap()
+        }
+        dismissPastePermissionIfPresent(application: application)
+        try awaitSecureValue(field, expected: expected, placeholder: placeholder)
+    }
+
+    private func dismissPastePermissionIfPresent(application: XCUIApplication) {
+        let localizedAllow = application.buttons["允许粘贴"]
+        let englishAllow = application.buttons["Allow Paste"]
+        if localizedAllow.waitForExistence(timeout: 2), localizedAllow.isHittable {
+            localizedAllow.tap()
+        } else if englishAllow.waitForExistence(timeout: 2), englishAllow.isHittable {
+            englishAllow.tap()
+        }
+    }
+
+    private func awaitSecureValue(_ field: XCUIElement, expected: String, placeholder: String?) throws {
+        let predicate = NSPredicate { object, _ in
+            guard let value = (object as? XCUIElement)?.value as? String else { return false }
+            return value == expected || (value != placeholder && value.contains("•"))
+        }
+        try require(expect(field, matching: predicate, timeout: 5), "配对 Key 输入值无效")
+    }
+
+    private func typeAndAwaitSecureValue(
+        _ field: XCUIElement,
+        expected: String,
+        fieldName: String
+    ) throws {
+        try require(field.waitForExistence(timeout: 5), "\(fieldName)输入框未出现")
+        let placeholder = field.value as? String
+        field.tap()
+        field.typeText(expected)
+        try awaitSecureValue(field, expected: expected, placeholder: placeholder)
+    }
+
+    private func expect(_ element: XCUIElement, matching predicate: NSPredicate, timeout: TimeInterval) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func require(_ condition: Bool, _ message: String) throws {
+        guard condition else {
+            XCTFail(message)
+            throw UIFlowError.stepFailed
+        }
+    }
+
+    private enum UIFlowError: Error {
+        case stepFailed
+    }
+
+    private func deviceButton(application: XCUIApplication, name: String) -> XCUIElement {
+        application.descendants(matching: .any)["device-row-\(name)"]
     }
 
     private func assertAssistantAtComposer(application: XCUIApplication) {

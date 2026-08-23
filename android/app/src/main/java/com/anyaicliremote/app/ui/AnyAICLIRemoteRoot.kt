@@ -2,15 +2,24 @@ package com.anyaicliremote.app.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
-import com.anyaicliremote.app.ui.screens.ChatScreen
-import com.anyaicliremote.app.ui.screens.DeviceListScreen
-import com.anyaicliremote.app.ui.screens.PairingScreen
-import com.anyaicliremote.app.ui.screens.SessionListScreen
+import com.anyaicliremote.feature.ui.AppDestination
+import com.anyaicliremote.feature.ui.ChatUiState
+import com.anyaicliremote.feature.ui.ChatViewModel
+import com.anyaicliremote.feature.ui.screens.ChatScreen
+import com.anyaicliremote.feature.ui.screens.DeviceListScreen
+import com.anyaicliremote.feature.ui.screens.PairingScreen
+import com.anyaicliremote.feature.ui.screens.SessionListScreen
 
 @Composable
-internal fun AnyAICLIRemoteRoot(state: ChatUiState, viewModel: ChatViewModel, onScanPairingCode: () -> Unit = {}) {
+internal fun AnyAICLIRemoteRoot(
+    state: ChatUiState,
+    viewModel: ChatViewModel,
+    onScanPairingCode: () -> Unit = {},
+) {
     when (state.destination) {
-        AppDestination.DEVICES -> DeviceListScreen(state, viewModel, onScanPairingCode)
+        AppDestination.DEVICES -> {
+            DeviceListScreen(state, viewModel, onScanPairingCode)
+        }
         AppDestination.PAIRING -> {
             BackHandler { viewModel.cancelPairing() }
             PairingScreen(state, viewModel)

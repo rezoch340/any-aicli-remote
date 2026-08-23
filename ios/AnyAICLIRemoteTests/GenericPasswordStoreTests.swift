@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import AnyAICLIRemote
+@testable import AnyAICLIRemoteCore
 
 final class GenericPasswordStoreTests: XCTestCase {
     func testGenericPasswordRoundTripUpdateAndIdempotentDelete() throws {
@@ -8,6 +8,15 @@ final class GenericPasswordStoreTests: XCTestCase {
             service: "com.anyaicliremote.tests.\(UUID().uuidString)",
             account: "round-trip"
         )
+        do {
+            _ = try GenericPasswordStore.read(at: location)
+        } catch let error as GenericPasswordStoreError where error.isMissingEntitlement {
+            throw XCTSkip("Simulator test bundle has no keychain entitlement")
+        }
+        try runRoundTrip(at: location)
+    }
+
+    private func runRoundTrip(at location: GenericPasswordLocation) throws {
         defer { try? GenericPasswordStore.delete(at: location) }
 
         XCTAssertNil(try GenericPasswordStore.read(at: location))

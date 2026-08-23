@@ -41,11 +41,26 @@ resolve_ios_test_destination() {
 echo "==> Go backend quality and macOS launcher build"
 "$PROJECT_ROOT/scripts/build-macos-app.sh"
 
-echo "==> Android unit tests, debug build, and lint"
-"$PROJECT_ROOT/android/gradlew" -p "$PROJECT_ROOT/android" \
-  :app:testDebugUnitTest \
-  :app:assembleDebug \
-  :app:lintDebug
+echo "==> Android static analysis, unit tests, debug build, and lint"
+ANDROID_MODULES=(
+  "core:model"
+  "core:remote"
+  "core:storage"
+  "core:session"
+  "core:chat"
+  "feature:ui"
+  "app"
+)
+ANDROID_GRADLE_TASKS=()
+for android_module in "${ANDROID_MODULES[@]}"; do
+  ANDROID_GRADLE_TASKS+=(
+    ":${android_module}:testDebugUnitTest"
+    ":${android_module}:assembleDebug"
+    ":${android_module}:lintDebug"
+    ":${android_module}:detekt"
+  )
+done
+"$PROJECT_ROOT/android/gradlew" -p "$PROJECT_ROOT/android" "${ANDROID_GRADLE_TASKS[@]}"
 
 if [[ "${RUN_ANDROID_CONNECTED_E2E:-0}" == "1" ]]; then
   echo "==> Android connected E2E"
@@ -61,6 +76,9 @@ echo "==> Generate iOS Xcode project"
 xcodegen generate \
   --spec "$PROJECT_ROOT/ios/project.yml" \
   --project "$PROJECT_ROOT/ios"
+
+echo "==> Native source quality gate"
+"$PROJECT_ROOT/scripts/check-native-source-quality.sh"
 
 echo "==> iOS simulator build"
 xcodebuild \

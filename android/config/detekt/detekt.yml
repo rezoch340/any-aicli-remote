@@ -1,0 +1,44 @@
+build:
+  maxIssues: 0
+
+config:
+  validation: true
+
+complexity:
+  LargeClass:
+    active: true
+    threshold: 600
+  LongMethod:
+    active: true
+    threshold: 80
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 20
+    thresholdInClasses: 30
+    thresholdInInterfaces: 20
+    ignorePrivate: true
+    thresholdInObjects: 20
+    thresholdInEnums: 20
+
+style:
+  ReturnCount:
+    active: true
+    max: 5
+    excludeGuardClauses: true
+  MagicNumber:
+    active: true
+    ignorePropertyDeclaration: true
+  MaxLineLength:
+    active: true
+    maxLineLength: 160
+
+naming:
+  VariableNaming:
+    active: true
+    variablePattern: '^(?:(?:id|ID|URL|RPC|HTTP|OS|UI|IP)|[a-z][A-Za-z0-9]{2,})$'
+  FunctionParameterNaming:
+    active: true
+    parameterPattern: '^(?:(?:id|ID|URL|RPC|HTTP|OS|UI|IP)|[a-z][A-Za-z0-9]{2,})$'
+  FunctionNaming:
+    active: true
+    functionPattern: '^(?:(?:id|ID|URL|RPC|HTTP|OS|UI|IP)|[A-Za-z][A-Za-z0-9]{2,})$'

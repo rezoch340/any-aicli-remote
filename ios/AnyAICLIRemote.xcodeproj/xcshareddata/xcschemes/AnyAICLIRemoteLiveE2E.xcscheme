@@ -55,6 +55,11 @@
       </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable
+            key = "ANY_AI_CLI_REMOTE_LIVE_PAIRING_KEY_FILE"
+            value = "$(ANY_AI_CLI_REMOTE_LIVE_PAIRING_KEY_FILE)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "ANY_AI_CLI_REMOTE_LIVE_UI_TEST"
             value = "1"
             isEnabled = "YES">

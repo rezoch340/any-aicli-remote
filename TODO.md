@@ -33,6 +33,12 @@ then include the checkbox update in that feature's commit.
   - [x] Cover multi-device persistent pairing, disconnected-device navigation, session workspaces, history, streaming/cancel/permission/reconnect, rich-text/file behavior, and current brand naming.
   - Commit: `✨ 客户端：完成原生端功能与联调`
 
+- [x] **4A. 原生客户端代码质量门禁**
+  - [x] Android first，拆分接近千行的 ChatViewModel，复用 canonical reducer/协议 helper，清除缩写和魔法值。
+  - [x] iOS afterward，拆分接近千行 ChatStore，集中 ACP 方法/参数映射和迁移 helper，清除缩写和魔法值。
+  - [x] 使用维护中的 Kotlin/Swift lint 工具建立声明名至少 3 字符（仅允许技术专名）、单文件最多 600 行和复杂度门禁，并完成 Android/iOS 功能与 E2E 回归。
+  - Commit: `♻️ 客户端：拆分状态管理并建立质量门禁`
+
 - [ ] **5. 子 Agent 实时卡片**
   - [ ] Backend first: represent each child Agent as a stable typed entity and emit ordered lifecycle/update events rather than asking clients to parse terminal or Markdown text.
   - [ ] Prove backend event identity, ordering, reconnect replay, history reconstruction, completion, failure, and cancellation with protocol tests before touching app UI.

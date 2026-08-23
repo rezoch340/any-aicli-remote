@@ -1,4 +1,6 @@
 import SwiftUI
+import AnyAICLIRemoteCore
+import AnyAICLIRemoteFeature
 
 @main
 struct AnyAICLIRemoteApp: App {
@@ -10,7 +12,7 @@ struct AnyAICLIRemoteApp: App {
     init() {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains(Self.uiTestingResetArgument) {
-            ChatStore.resetStorageForUITesting()
+            DeviceProfileRepository.resetStorageForUITesting()
         }
         #endif
         _store = StateObject(wrappedValue: ChatStore())
