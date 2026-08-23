@@ -106,7 +106,7 @@ func (manager *Manager) Start(operationContext context.Context) error {
 			changed = true
 			continue
 		}
-		manager.startLocked(identifier)
+		manager.startLocked(identifier, true)
 	}
 	if changed {
 		return manager.saveLocked()
@@ -190,7 +190,7 @@ func (manager *Manager) Create(sessionID, prompt string, intervalSeconds int, in
 		return Job{}, operationError
 	}
 	if manager.running {
-		manager.startLocked(identifier)
+		manager.startLocked(identifier, false)
 	}
 	return *job, nil
 }
@@ -291,23 +291,42 @@ func NormalizeInterval(seconds int) (int, string) {
 
 var intervalPattern = regexp.MustCompile(`^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)?$`)
 
-func (manager *Manager) startLocked(identifier string) {
+func (manager *Manager) startLocked(identifier string, delayBeforeFirstFire bool) {
 	if !manager.running || manager.tasks[identifier] != nil || manager.jobs[identifier] == nil {
 		return
 	}
 	taskContext, cancel := context.WithCancel(manager.operationContext)
 	manager.tasks[identifier] = cancel
 	manager.waitGroup.Add(1)
-	go manager.run(taskContext, identifier)
+	go manager.run(taskContext, identifier, delayBeforeFirstFire)
 }
 
-func (manager *Manager) run(operationContext context.Context, identifier string) {
+func (manager *Manager) run(operationContext context.Context, identifier string, delayBeforeFirstFire bool) {
 	defer manager.waitGroup.Done()
 	defer func() {
 		manager.mutex.Lock()
 		delete(manager.tasks, identifier)
 		manager.mutex.Unlock()
 	}()
+	if delayBeforeFirstFire {
+		manager.mutex.Lock()
+		job := manager.jobs[identifier]
+		interval := time.Duration(0)
+		if job != nil {
+			interval = time.Duration(job.IntervalSeconds) * time.Second
+		}
+		manager.mutex.Unlock()
+		if interval <= 0 {
+			return
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-operationContext.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 	for {
 		manager.mutex.Lock()
 		job := manager.jobs[identifier]

@@ -22,14 +22,15 @@ func waitForTestCondition(testInstance *testing.T, description string, condition
 }
 
 func TestCloseLinearizesConcurrentAgentPublication(testInstance *testing.T) {
-	hubInstance := New("ws://unused.invalid", func() string { return "" }, nil, nil)
+	hubInstance := newTestHub("ws://unused.invalid", "", nil)
 	hubInstance.agentMutex.Lock()
 
 	publicationStarted := make(chan struct{})
 	publicationResult := make(chan bool, 1)
 	go func() {
 		close(publicationStarted)
-		publicationResult <- hubInstance.publishAgent(nil)
+		_, _, published := hubInstance.publishAgent(nil)
+		publicationResult <- published
 	}()
 	<-publicationStarted
 
@@ -56,13 +57,14 @@ func TestCloseLinearizesConcurrentAgentPublication(testInstance *testing.T) {
 
 func TestCloseReturnsWithNoConnectionsClientsTerminalsOrReverseTasks(testInstance *testing.T) {
 	agent := newFakeAgent(testInstance)
-	hubInstance := New(agent.websocketURL(), func() string { return testInstance.TempDir() }, nil, nil)
+	workingDirectory := testInstance.TempDir()
+	hubInstance := newTestHub(agent.websocketURL(), workingDirectory, nil)
 	clientConnection, closeClient := connectHubClient(testInstance, hubInstance)
 	defer closeClient()
 	waitForTestCondition(testInstance, "upstream agent connection", hubInstance.AgentConnected)
 
 	created := reverseCall(testInstance, agent, "close-terminal-create", "terminal/create", map[string]any{
-		"command": "sleep 30",
+		"sessionId": "close-session", "command": "sleep 30",
 	})
 	terminalIdentifier, valid := rpcResult(testInstance, created)["terminalId"].(string)
 	if !valid || terminalIdentifier == "" {
@@ -76,7 +78,7 @@ func TestCloseReturnsWithNoConnectionsClientsTerminalsOrReverseTasks(testInstanc
 		"jsonrpc": "2.0",
 		"id":      "close-terminal-wait",
 		"method":  "terminal/wait_for_exit",
-		"params":  map[string]any{"terminalId": terminalIdentifier},
+		"params":  map[string]any{"sessionId": "close-session", "terminalId": terminalIdentifier},
 	})
 	waitForTestCondition(testInstance, "blocked reverse task", func() bool {
 		return hubInstance.reverseActive.Load() == 1
@@ -106,13 +108,68 @@ func TestCloseReturnsWithNoConnectionsClientsTerminalsOrReverseTasks(testInstanc
 	if operationError := hubInstance.Ensure(context.Background()); operationError == nil {
 		testInstance.Fatal("closed hub accepted ensure")
 	}
-	if _, operationError := hubInstance.terminals.create(map[string]any{"command": "sleep 30"}); operationError == nil {
+	if _, operationError := hubInstance.terminals.create(map[string]any{"command": "sleep 30"}, "closed-session", workingDirectory); operationError == nil {
 		testInstance.Fatal("closed terminal manager started a terminal")
 	}
 }
 
+func TestDelayedReverseReplyCannotCrossAgentGeneration(testInstance *testing.T) {
+	firstAgent := newFakeAgent(testInstance)
+	secondAgent := newFakeAgent(testInstance)
+	workingDirectory := testInstance.TempDir()
+	hubInstance := newTestHub(firstAgent.websocketURL(), workingDirectory, nil)
+	defer hubInstance.Close()
+	ensureContext, cancelEnsure := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelEnsure()
+	if operationError := hubInstance.Ensure(ensureContext); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+
+	created := reverseCall(testInstance, firstAgent, "generation-terminal-create", "terminal/create", map[string]any{
+		"sessionId": "generation-session", "command": "sleep 30",
+	})
+	terminalIdentifier, valid := rpcResult(testInstance, created)["terminalId"].(string)
+	if !valid || terminalIdentifier == "" {
+		testInstance.Fatalf("terminal/create result = %#v", created)
+	}
+	firstAgent.send(testInstance, map[string]any{
+		"jsonrpc": "2.0", "id": "old-generation-wait", "method": "terminal/wait_for_exit",
+		"params": map[string]any{"sessionId": "generation-session", "terminalId": terminalIdentifier},
+	})
+	waitForTestCondition(testInstance, "blocked old-generation reverse request", func() bool {
+		return hubInstance.reverseActive.Load() == 1
+	})
+
+	firstAgent.disconnect(testInstance)
+	waitForTestCondition(testInstance, "first agent disconnect", func() bool {
+		return !hubInstance.AgentConnected()
+	})
+	hubInstance.agentURL = secondAgent.websocketURL()
+	reconnectContext, cancelReconnect := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelReconnect()
+	if operationError := hubInstance.Ensure(reconnectContext); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	waitForTestCondition(testInstance, "old-generation reverse cancellation", func() bool {
+		return hubInstance.reverseActive.Load() == 0
+	})
+
+	timer := time.NewTimer(300 * time.Millisecond)
+	defer timer.Stop()
+	for {
+		select {
+		case unexpected := <-secondAgent.messages:
+			if unexpected["method"] == nil && idKey(unexpected["id"]) == idKey("old-generation-wait") {
+				testInstance.Fatalf("old reverse response reached replacement agent: %#v", unexpected)
+			}
+		case <-timer.C:
+			return
+		}
+	}
+}
+
 func TestClosedHubRejectsNewWebSocketBeforeUpgrade(testInstance *testing.T) {
-	hubInstance := New("ws://unused.invalid", func() string { return "" }, nil, nil)
+	hubInstance := newTestHub("ws://unused.invalid", "", nil)
 	hubInstance.Close()
 	server := httptest.NewServer(http.HandlerFunc(hubInstance.HandleWebSocket))
 	defer server.Close()
@@ -136,6 +193,7 @@ func TestClosedHubRejectsNewWebSocketBeforeUpgrade(testInstance *testing.T) {
 
 func TestTerminalCreateCannotCrossCloseBoundary(testInstance *testing.T) {
 	managerInstance := newTerminalManager()
+	workingDirectory := testInstance.TempDir()
 	managerInstance.accessMutex.Lock()
 	closeReturned := make(chan struct{})
 	go func() {
@@ -146,7 +204,7 @@ func TestTerminalCreateCannotCrossCloseBoundary(testInstance *testing.T) {
 
 	createReturned := make(chan error, 1)
 	go func() {
-		_, operationError := managerInstance.create(map[string]any{"command": "sleep 30"})
+		_, operationError := managerInstance.create(map[string]any{"command": "sleep 30"}, "closing-session", workingDirectory)
 		createReturned <- operationError
 	}()
 	if operationError := <-createReturned; operationError == nil {
@@ -167,7 +225,7 @@ func TestTerminalCreateCannotCrossCloseBoundary(testInstance *testing.T) {
 
 func TestIdleClientStaysConnectedThroughProtocolHeartbeat(testInstance *testing.T) {
 	agent := newFakeAgent(testInstance)
-	hubInstance := New(agent.websocketURL(), func() string { return testInstance.TempDir() }, nil, nil)
+	hubInstance := newTestHub(agent.websocketURL(), testInstance.TempDir(), nil)
 	hubInstance.heartbeatInterval = 10 * time.Millisecond
 	hubInstance.clientReadTimeout = 80 * time.Millisecond
 	defer hubInstance.Close()

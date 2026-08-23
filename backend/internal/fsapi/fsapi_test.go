@@ -107,6 +107,12 @@ func TestServiceRejectsWorkspaceEscapeIncludingSymlink(testContext *testing.T) {
 	if _, operationError := service.Write("escape/new.txt", "bad"); operationError == nil {
 		testContext.Fatal("write through escaping symlink succeeded")
 	}
+	if _, operationError := service.OpenRead("escape/secret.txt"); operationError == nil {
+		testContext.Fatal("open through escaping symlink succeeded")
+	}
+	if _, operationError := service.OpenDirectory("escape"); operationError == nil {
+		testContext.Fatal("open directory through escaping symlink succeeded")
+	}
 	listing, operationError := service.List(".")
 	if operationError != nil {
 		testContext.Fatal(operationError)
@@ -164,6 +170,51 @@ func TestSetRoot(testContext *testing.T) {
 	mustWrite(testContext, file, []byte("old"))
 	if _, operationError := service.Read(file); !errors.Is(operationError, OutsideWorkspaceError) {
 		testContext.Fatalf("old absolute root error = %v", operationError)
+	}
+}
+
+func TestPinnedWorkspaceFailsClosedAfterRootReplacement(testContext *testing.T) {
+	parentDirectory := testContext.TempDir()
+	workspacePath := filepath.Join(parentDirectory, "workspace")
+	originalPath := filepath.Join(parentDirectory, "workspace-original")
+	outsidePath := testContext.TempDir()
+	if operationError := os.Mkdir(workspacePath, 0o755); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	mustWrite(testContext, filepath.Join(workspacePath, "inside.txt"), []byte("inside"))
+	mustWrite(testContext, filepath.Join(outsidePath, "secret.txt"), []byte("secret"))
+	rootIdentity, operationError := PinRoot(workspacePath)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	service, operationError := NewPinned(rootIdentity)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	defer service.Close()
+	if operationError := os.Rename(workspacePath, originalPath); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if operationError := os.Symlink(outsidePath, workspacePath); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if _, operationError := service.Read("secret.txt"); !errors.Is(operationError, WorkspaceChangedError) {
+		testContext.Fatalf("symlink replacement read error = %v", operationError)
+	}
+	if _, operationError := service.Write("written.txt", "bad"); !errors.Is(operationError, WorkspaceChangedError) {
+		testContext.Fatalf("symlink replacement write error = %v", operationError)
+	}
+	if _, operationError := os.Stat(filepath.Join(outsidePath, "written.txt")); !errors.Is(operationError, os.ErrNotExist) {
+		testContext.Fatalf("replacement target was modified: %v", operationError)
+	}
+	if operationError := os.Remove(workspacePath); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if operationError := os.Mkdir(workspacePath, 0o755); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if _, operationError := service.List("."); !errors.Is(operationError, WorkspaceChangedError) {
+		testContext.Fatalf("different-directory replacement list error = %v", operationError)
 	}
 }
 

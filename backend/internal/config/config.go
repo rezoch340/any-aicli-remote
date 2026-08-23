@@ -10,9 +10,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/compat"
+	providerfactory "github.com/rezoch340/any-aicli-remote/backend/internal/provider/factory"
 )
 
 const (
@@ -25,17 +27,18 @@ type Config struct {
 	Port              int
 	AgentHost         string
 	AgentPort         int
-	Secret            string
-	SecretFile        string
-	WorkingDirectory  string
+	PairingSecret     string
+	PairingSecretFile string
+	AgentSecret       string
+	AgentSecretFile   string
+	RuntimeDirectory  string
 	PublicHost        string
-	GrokPath          string
+	ProviderID        string
+	ProviderPath      string
 	DataDirectory     string
-	SessionsDirectory string
 	EnsureAgent       bool
 	StopAgentOnExit   bool
-	AlwaysApprove     bool
-	Leader            bool
+	ProviderOptions   map[string]string
 }
 
 func Parse(arguments []string) (Config, error) {
@@ -43,46 +46,46 @@ func Parse(arguments []string) (Config, error) {
 	if operationError != nil {
 		return Config{}, fmt.Errorf("resolve home: %w", operationError)
 	}
-	workingDirectory, operationError := os.Getwd()
-	if operationError != nil {
-		return Config{}, fmt.Errorf("resolve cwd: %w", operationError)
-	}
+	dataDirectory := compat.Environment("ANY_AI_CLI_REMOTE_DATA_DIR", filepath.Join(home, ".any-aicli-remote"))
 
 	configuration := Config{
-		Bind:              environmentOrDefault("GROK_REMOTE_BIND", "0.0.0.0"),
-		Port:              environmentInteger("GROK_REMOTE_PORT", DefaultPort),
-		AgentHost:         environmentOrDefault("GROK_REMOTE_AGENT_HOST", "127.0.0.1"),
-		AgentPort:         environmentInteger("GROK_REMOTE_AGENT_PORT", DefaultAgentPort),
-		Secret:            strings.TrimSpace(os.Getenv("GROK_AGENT_SECRET")),
-		SecretFile:        strings.TrimSpace(os.Getenv("GROK_REMOTE_SECRET_FILE")),
-		WorkingDirectory:  environmentOrDefault("GROK_REMOTE_CWD", workingDirectory),
-		PublicHost:        strings.TrimSpace(os.Getenv("GROK_REMOTE_PUBLIC_HOST")),
-		GrokPath:          strings.TrimSpace(os.Getenv("GROK_REMOTE_GROK_PATH")),
-		DataDirectory:     environmentOrDefault("GROK_PLUGIN_DATA", filepath.Join(home, ".grok", "plugin-data", "grok-remote")),
-		SessionsDirectory: environmentOrDefault("GROK_REMOTE_SESSIONS_DIR", filepath.Join(home, ".grok", "sessions")),
-		EnsureAgent:       environmentBoolean("GROK_REMOTE_ENSURE_AGENT", true),
-		StopAgentOnExit:   environmentBoolean("GROK_REMOTE_STOP_AGENT_ON_EXIT", false),
-		AlwaysApprove:     environmentBoolean("GROK_REMOTE_ALWAYS_APPROVE", true),
-		Leader:            environmentBoolean("GROK_REMOTE_LEADER", false),
+		Bind:              compat.Environment("ANY_AI_CLI_REMOTE_BIND", "0.0.0.0"),
+		Port:              environmentInteger("ANY_AI_CLI_REMOTE_PORT", DefaultPort),
+		AgentHost:         compat.Environment("ANY_AI_CLI_REMOTE_AGENT_HOST", "127.0.0.1"),
+		AgentPort:         environmentInteger("ANY_AI_CLI_REMOTE_AGENT_PORT", DefaultAgentPort),
+		PairingSecret:     compat.Environment("ANY_AI_CLI_REMOTE_PAIRING_SECRET", ""),
+		PairingSecretFile: compat.Environment("ANY_AI_CLI_REMOTE_PAIRING_SECRET_FILE", ""),
+		AgentSecret:       compat.Environment("ANY_AI_CLI_REMOTE_AGENT_SECRET", ""),
+		AgentSecretFile:   compat.Environment("ANY_AI_CLI_REMOTE_AGENT_SECRET_FILE", ""),
+		RuntimeDirectory:  compat.Environment("ANY_AI_CLI_REMOTE_RUNTIME_DIR", filepath.Join(dataDirectory, "run")),
+		PublicHost:        compat.Environment("ANY_AI_CLI_REMOTE_PUBLIC_HOST", ""),
+		ProviderID:        compat.Environment("ANY_AI_CLI_REMOTE_PROVIDER", providerfactory.DefaultProviderID),
+		ProviderPath:      compat.Environment("ANY_AI_CLI_REMOTE_PROVIDER_PATH", ""),
+		DataDirectory:     dataDirectory,
+		EnsureAgent:       compat.BooleanEnvironment("ANY_AI_CLI_REMOTE_ENSURE_AGENT", true),
+		StopAgentOnExit:   compat.BooleanEnvironment("ANY_AI_CLI_REMOTE_STOP_AGENT_ON_EXIT", false),
 	}
+	providerOptions := providerfactory.NewOptionParser()
 
-	flagSet := flag.NewFlagSet("grok-remote-daemon", flag.ContinueOnError)
+	flagSet := flag.NewFlagSet("any-aicli-remote-daemon", flag.ContinueOnError)
 	flagSet.SetOutput(os.Stderr)
 	flagSet.StringVar(&configuration.Bind, "bind", configuration.Bind, "HTTP bind address")
 	flagSet.IntVar(&configuration.Port, "port", configuration.Port, "HTTP/WebSocket port")
-	flagSet.StringVar(&configuration.AgentHost, "agent-host", configuration.AgentHost, "Grok agent host")
-	flagSet.IntVar(&configuration.AgentPort, "agent-port", configuration.AgentPort, "Grok agent port")
-	flagSet.StringVar(&configuration.Secret, "secret", configuration.Secret, "pairing secret (prefer --secret-file or env)")
-	flagSet.StringVar(&configuration.SecretFile, "secret-file", configuration.SecretFile, "pairing secret file")
-	flagSet.StringVar(&configuration.WorkingDirectory, "cwd", configuration.WorkingDirectory, "workspace root")
+	flagSet.StringVar(&configuration.AgentHost, "agent-host", configuration.AgentHost, "provider agent host")
+	flagSet.IntVar(&configuration.AgentPort, "agent-port", configuration.AgentPort, "provider agent port")
+	flagSet.StringVar(&configuration.PairingSecretFile, "pairing-secret-file", configuration.PairingSecretFile, "device pairing secret file")
+	flagSet.StringVar(&configuration.PairingSecretFile, "secret-file", configuration.PairingSecretFile, "deprecated alias for --pairing-secret-file")
+	flagSet.StringVar(&configuration.AgentSecretFile, "agent-secret-file", configuration.AgentSecretFile, "local provider-agent transport secret file")
+	flagSet.StringVar(&configuration.RuntimeDirectory, "runtime-dir", configuration.RuntimeDirectory, "neutral daemon runtime directory")
+	legacyWorkingDirectory := compat.Environment("ANY_AI_CLI_REMOTE_CWD", "")
+	flagSet.StringVar(&legacyWorkingDirectory, "cwd", legacyWorkingDirectory, "deprecated compatibility option; a workspace is selected only when creating a session")
 	flagSet.StringVar(&configuration.PublicHost, "public-host", configuration.PublicHost, "public pairing host")
-	flagSet.StringVar(&configuration.GrokPath, "grok", configuration.GrokPath, "path to Grok CLI")
+	flagSet.StringVar(&configuration.ProviderID, "provider", configuration.ProviderID, "CLI provider identifier")
+	flagSet.StringVar(&configuration.ProviderPath, "provider-path", configuration.ProviderPath, "path to provider CLI")
 	flagSet.StringVar(&configuration.DataDirectory, "data-dir", configuration.DataDirectory, "daemon data directory")
-	flagSet.StringVar(&configuration.SessionsDirectory, "sessions-dir", configuration.SessionsDirectory, "Grok sessions directory")
-	flagSet.BoolVar(&configuration.EnsureAgent, "ensure-agent", configuration.EnsureAgent, "start grok agent serve when needed")
-	flagSet.BoolVar(&configuration.StopAgentOnExit, "stop-agent-on-exit", configuration.StopAgentOnExit, "stop the owned Grok agent when the daemon exits")
-	flagSet.BoolVar(&configuration.AlwaysApprove, "always-approve", configuration.AlwaysApprove, "launch agent with --always-approve")
-	flagSet.BoolVar(&configuration.Leader, "leader", configuration.Leader, "launch agent in leader mode")
+	flagSet.BoolVar(&configuration.EnsureAgent, "ensure-agent", configuration.EnsureAgent, "start the provider agent when needed")
+	flagSet.BoolVar(&configuration.StopAgentOnExit, "stop-agent-on-exit", configuration.StopAgentOnExit, "stop the owned provider agent when the daemon exits")
+	providerOptions.BindFlags(flagSet, &configuration.ProviderPath)
 	if operationError := flagSet.Parse(arguments); operationError != nil {
 		return Config{}, operationError
 	}
@@ -93,45 +96,49 @@ func Parse(arguments []string) (Config, error) {
 		return Config{}, errors.New("HTTP and agent ports must differ")
 	}
 
-	configuration.WorkingDirectory, operationError = filepath.Abs(expandHome(configuration.WorkingDirectory, home))
-	if operationError != nil {
-		return Config{}, fmt.Errorf("resolve workspace: %w", operationError)
-	}
-	info, operationError := os.Stat(configuration.WorkingDirectory)
-	if operationError != nil || !info.IsDir() {
-		return Config{}, fmt.Errorf("workspace is not a directory: %s", configuration.WorkingDirectory)
-	}
 	configuration.DataDirectory = expandHome(configuration.DataDirectory, home)
-	configuration.SessionsDirectory = expandHome(configuration.SessionsDirectory, home)
-	if configuration.GrokPath == "" {
-		configuration.GrokPath = discoverGrok(home)
+	configuration.RuntimeDirectory, operationError = filepath.Abs(expandHome(configuration.RuntimeDirectory, home))
+	if operationError != nil {
+		return Config{}, fmt.Errorf("resolve runtime directory: %w", operationError)
 	}
-	if configuration.EnsureAgent && configuration.GrokPath == "" {
-		return Config{}, errors.New("grok CLI not found (expected ~/.grok/bin/grok or PATH)")
+	configuration.ProviderPath = expandHome(configuration.ProviderPath, home)
+	configuration.ProviderOptions = providerOptions.Values()
+	for optionName, optionValue := range configuration.ProviderOptions {
+		configuration.ProviderOptions[optionName] = expandHome(optionValue, home)
 	}
-	if configuration.SecretFile == "" {
-		configuration.SecretFile = discoverSecretFile(home, configuration.DataDirectory)
+	migratePairingSecret := configuration.PairingSecret == "" && configuration.PairingSecretFile == ""
+	if operationError := compat.MigrateDataFiles(configuration.DataDirectory, home, migratePairingSecret); operationError != nil {
+		return Config{}, operationError
+	}
+	if configuration.PairingSecretFile == "" {
+		configuration.PairingSecretFile = filepath.Join(configuration.DataDirectory, "pairing-secret")
 	} else {
-		configuration.SecretFile = expandHome(configuration.SecretFile, home)
+		configuration.PairingSecretFile = expandHome(configuration.PairingSecretFile, home)
 	}
-	if configuration.Secret == "" {
-		configuration.Secret, operationError = loadOrCreateSecret(configuration.SecretFile)
+	if configuration.AgentSecretFile == "" {
+		configuration.AgentSecretFile = filepath.Join(configuration.DataDirectory, "agent-transport-secret")
+	} else {
+		configuration.AgentSecretFile = expandHome(configuration.AgentSecretFile, home)
+	}
+	if configuration.PairingSecret == "" {
+		configuration.PairingSecret, operationError = loadOrCreateSecret(configuration.PairingSecretFile)
 		if operationError != nil {
 			return Config{}, operationError
 		}
 	}
-	if len(configuration.Secret) < 16 {
+	if configuration.AgentSecret == "" {
+		configuration.AgentSecret, operationError = loadOrCreateSecret(configuration.AgentSecretFile)
+		if operationError != nil {
+			return Config{}, operationError
+		}
+	}
+	if len(configuration.PairingSecret) < 16 {
 		return Config{}, errors.New("pairing secret must contain at least 16 characters")
 	}
+	if len(configuration.AgentSecret) < 16 {
+		return Config{}, errors.New("agent transport secret must contain at least 16 characters")
+	}
 	return configuration, nil
-}
-
-func (configuration Config) AgentWebSocketURL() string {
-	return "ws://" + net.JoinHostPort(configuration.AgentHost, strconv.Itoa(configuration.AgentPort)) + "/ws?server-key=" + configuration.Secret
-}
-
-func (configuration Config) LocalURL() string {
-	return fmt.Sprintf("http://127.0.0.1:%d/?key=%s&auto=1", configuration.Port, configuration.Secret)
 }
 
 func (configuration Config) PairingURL(lanIP string) string {
@@ -151,7 +158,7 @@ func (configuration Config) PairingURL(lanIP string) string {
 	}
 	parsed.Path = "/"
 	query := parsed.Query()
-	query.Set("key", configuration.Secret)
+	query.Set("key", configuration.PairingSecret)
 	query.Set("auto", "1")
 	parsed.RawQuery = query.Encode()
 	parsed.Fragment = ""
@@ -159,7 +166,9 @@ func (configuration Config) PairingURL(lanIP string) string {
 }
 
 // PairingDeepLink opens the native mobile client directly when it is installed.
-func (configuration Config) PairingDeepLink(lanIP, workingDirectory string) string {
+// Device pairing intentionally contains no project workspace. Existing sessions
+// recover their directory and new sessions supply one explicitly.
+func (configuration Config) PairingDeepLink(lanIP string) string {
 	pairingURL := configuration.PairingURL(lanIP)
 	if pairingURL == "" {
 		return ""
@@ -169,11 +178,8 @@ func (configuration Config) PairingDeepLink(lanIP, workingDirectory string) stri
 		return ""
 	}
 	base.RawQuery = ""
-	query := url.Values{"url": {base.String()}, "key": {configuration.Secret}}
-	if strings.TrimSpace(workingDirectory) != "" {
-		query.Set("cwd", workingDirectory)
-	}
-	return "grokremote://pair?" + query.Encode()
+	query := url.Values{"url": {base.String()}, "key": {configuration.PairingSecret}}
+	return "anyaicliremote://pair?" + query.Encode()
 }
 
 func defaultPortForScheme(scheme string) int {
@@ -183,27 +189,12 @@ func defaultPortForScheme(scheme string) int {
 	return 80
 }
 
-func environmentOrDefault(key, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func environmentInteger(key string, fallback int) int {
-	value, operationError := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+func environmentInteger(primaryKey string, fallback int) int {
+	value, operationError := strconv.Atoi(compat.Environment(primaryKey, ""))
 	if operationError != nil || value == 0 {
 		return fallback
 	}
 	return value
-}
-
-func environmentBoolean(key string, fallback bool) bool {
-	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
-	if value == "" {
-		return fallback
-	}
-	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func expandHome(path, home string) string {
@@ -216,67 +207,27 @@ func expandHome(path, home string) string {
 	return path
 }
 
-func discoverGrok(home string) string {
-	candidates := []string{
-		filepath.Join(home, ".grok", "bin", "grok"),
-		filepath.Join(home, ".grok", "bin", "grok.exe"),
-	}
-	if path, operationError := os.Executable(); operationError == nil {
-		_ = path
-	}
-	for _, candidate := range candidates {
-		if info, operationError := os.Stat(candidate); operationError == nil && !info.IsDir() && info.Mode()&0111 != 0 {
-			return candidate
-		}
-	}
-	if path, operationError := execLookPath("grok"); operationError == nil {
-		return path
-	}
-	return ""
-}
-
-var execLookPath = func(name string) (string, error) {
-	path := os.Getenv("PATH")
-	for _, directory := range filepath.SplitList(path) {
-		candidate := filepath.Join(directory, name)
-		if info, operationError := os.Stat(candidate); operationError == nil && !info.IsDir() && info.Mode()&0111 != 0 {
-			return candidate, nil
-		}
-	}
-	return "", os.ErrNotExist
-}
-
-func discoverSecretFile(home, dataDirectory string) string {
-	patterns := []string{
-		filepath.Join(home, ".grok", "plugins", "grok-remote", ".ui-secret"),
-		filepath.Join(home, ".grok", "installed-plugins", "grok-remote-*", ".ui-secret"),
-	}
-	var matches []string
-	for _, pattern := range patterns {
-		found, _ := filepath.Glob(pattern)
-		matches = append(matches, found...)
-	}
-	sort.Slice(matches, func(leftIndex, rightIndex int) bool {
-		left, _ := os.Stat(matches[leftIndex])
-		right, _ := os.Stat(matches[rightIndex])
-		if left == nil || right == nil {
-			return matches[leftIndex] > matches[rightIndex]
-		}
-		return left.ModTime().After(right.ModTime())
-	})
-	for _, path := range matches {
-		if value, operationError := os.ReadFile(path); operationError == nil && len(strings.TrimSpace(string(value))) >= 16 {
-			return path
-		}
-	}
-	return filepath.Join(dataDirectory, ".ui-secret")
-}
-
 func loadOrCreateSecret(path string) (string, error) {
-	if data, operationError := os.ReadFile(path); operationError == nil {
-		if value := strings.TrimSpace(string(data)); len(value) >= 16 {
-			return value, nil
+	information, operationError := os.Lstat(path)
+	if operationError == nil {
+		if !information.Mode().IsRegular() {
+			return "", errors.New("secret path must be a regular file")
 		}
+		data, readError := os.ReadFile(path)
+		if readError != nil {
+			return "", fmt.Errorf("read secret: %w", readError)
+		}
+		value := strings.TrimSpace(string(data))
+		if len(value) < 16 {
+			return "", errors.New("secret file must contain at least 16 characters")
+		}
+		if permissionError := os.Chmod(path, 0o600); permissionError != nil {
+			return "", fmt.Errorf("protect secret: %w", permissionError)
+		}
+		return value, nil
+	}
+	if !errors.Is(operationError, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect secret: %w", operationError)
 	}
 	if operationError := os.MkdirAll(filepath.Dir(path), 0700); operationError != nil {
 		return "", fmt.Errorf("create secret directory: %w", operationError)
@@ -286,11 +237,18 @@ func loadOrCreateSecret(path string) (string, error) {
 		return "", fmt.Errorf("generate secret: %w", operationError)
 	}
 	value := hex.EncodeToString(bytes)
-	if operationError := os.WriteFile(path, []byte(value+"\n"), 0600); operationError != nil {
+	secretFile, operationError := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if operationError != nil {
+		return "", fmt.Errorf("create secret: %w", operationError)
+	}
+	if _, operationError := secretFile.WriteString(value + "\n"); operationError != nil {
+		_ = secretFile.Close()
+		_ = os.Remove(path)
 		return "", fmt.Errorf("write secret: %w", operationError)
 	}
-	if operationError := os.Chmod(path, 0600); operationError != nil {
-		return "", fmt.Errorf("protect secret: %w", operationError)
+	if operationError := secretFile.Close(); operationError != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("close secret: %w", operationError)
 	}
 	return value, nil
 }

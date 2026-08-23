@@ -1,4 +1,4 @@
-// Package room implements the small persistent agent chat room used by Grok Remote.
+// Package room implements the small persistent agent chat room used by Any AI CLI Remote.
 package room
 
 import (
@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/compat"
 )
 
 const (
@@ -55,15 +57,15 @@ type Store struct {
 // New returns a Store rooted at dir. Empty dir uses DataDir().
 func New(directory string) *Store { return &Store{Directory: directory} }
 
-// DataDir returns GROK_PLUGIN_DATA or ~/.grok/plugin-data/grok-remote, creating it.
+// DataDirectory returns the configured Any AI CLI Remote data directory.
 func DataDirectory() (string, error) {
-	base := os.Getenv("GROK_PLUGIN_DATA")
+	base := compat.Environment("ANY_AI_CLI_REMOTE_DATA_DIR", "")
 	if strings.TrimSpace(base) == "" {
 		home, operationError := os.UserHomeDir()
 		if operationError != nil {
 			return "", operationError
 		}
-		base = filepath.Join(home, ".grok", "plugin-data", "grok-remote")
+		base = filepath.Join(home, ".any-aicli-remote")
 	}
 	if operationError := os.MkdirAll(base, 0o755); operationError != nil {
 		return "", operationError
@@ -314,14 +316,14 @@ func (store *Store) Clear() error {
 
 var defaultStore = New("")
 
-// Say appends to the default GROK_PLUGIN_DATA room.
+// Say appends to the default Any AI CLI Remote room.
 func Say(who, text, kind string) SayResult { return defaultStore.Say(who, text, kind) }
 
-// Feed reads from the default GROK_PLUGIN_DATA room.
+// Feed reads from the default Any AI CLI Remote room.
 func Feed(since, limit int) ([]Message, error) { return defaultStore.Feed(since, limit) }
 
-// Members reads active speakers from the default GROK_PLUGIN_DATA room.
+// Members reads active speakers from the default Any AI CLI Remote room.
 func Members(window time.Duration) ([]Member, error) { return defaultStore.Members(window) }
 
-// Clear removes the default GROK_PLUGIN_DATA room.
+// Clear removes the default Any AI CLI Remote room.
 func Clear() error { return defaultStore.Clear() }

@@ -9,9 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/fsapi"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/terminalexec"
 )
 
 type limitedBuffer struct {
@@ -49,6 +53,7 @@ func (bufferInstance *limitedBuffer) snapshot() (string, bool) {
 
 type terminal struct {
 	terminalIdentifier string
+	sessionIdentifier  string
 	commandProcess     *exec.Cmd
 	output             *limitedBuffer
 	done               chan struct{}
@@ -127,31 +132,48 @@ func newTerminalManager() *terminalManager {
 	return &terminalManager{entries: make(map[string]*terminal)}
 }
 
-func (managerInstance *terminalManager) create(params map[string]any) (map[string]any, error) {
+func (managerInstance *terminalManager) create(params map[string]any, sessionIdentifier, sessionWorkingDirectory string) (map[string]any, error) {
+	rootIdentity, operationError := fsapi.PinRoot(sessionWorkingDirectory)
+	if operationError != nil {
+		return nil, operationError
+	}
+	return managerInstance.createPinned(params, sessionIdentifier, rootIdentity)
+}
+
+func (managerInstance *terminalManager) createPinned(params map[string]any, sessionIdentifier string, rootIdentity *fsapi.RootIdentity) (map[string]any, error) {
 	if managerInstance.closed.Load() {
 		return nil, errors.New("terminal manager closed")
+	}
+	sessionIdentifier = strings.TrimSpace(sessionIdentifier)
+	if sessionIdentifier == "" {
+		return nil, errors.New("sessionId required")
 	}
 	command := stringValue(params["command"])
 	if command == "" {
 		return nil, errors.New("command required")
 	}
 	arguments := stringSlice(params["args"])
-	workingDirectory := stringValue(params["cwd"])
+	filesystem, operationError := fsapi.NewPinned(rootIdentity)
+	if operationError != nil {
+		return nil, operationError
+	}
+	defer filesystem.Close()
+	workingDirectoryFile, operationError := filesystem.OpenDirectory(stringValue(params["cwd"]))
+	if operationError != nil {
+		return nil, operationError
+	}
+	defer workingDirectoryFile.Close()
 	limit := intValue(params["outputByteLimit"], 1_048_576)
 
-	var commandProcess *exec.Cmd
-	if len(arguments) > 0 {
-		commandProcess = exec.Command(command, arguments...)
-	} else {
-		commandProcess = exec.Command("/bin/sh", "-lc", command)
-	}
-	if workingDirectory != "" {
-		if info, operationError := os.Stat(workingDirectory); operationError == nil && info.IsDir() {
-			commandProcess.Dir = workingDirectory
-		}
+	commandProcess, operationError := terminalexec.Command(command, arguments, workingDirectoryFile)
+	if operationError != nil {
+		return nil, operationError
 	}
 	commandProcess.Env = os.Environ()
-	commandProcess.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if commandProcess.SysProcAttr == nil {
+		commandProcess.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	commandProcess.SysProcAttr.Setpgid = true
 	if raw, present := params["env"].([]any); present {
 		for _, item := range raw {
 			entry, present := item.(map[string]any)
@@ -177,20 +199,34 @@ func (managerInstance *terminalManager) create(params map[string]any) (map[strin
 		managerInstance.accessMutex.Unlock()
 		return nil, errors.New("terminal manager closed")
 	}
+	if operationError := rootIdentity.Validate(); operationError != nil {
+		managerInstance.accessMutex.Unlock()
+		return nil, operationError
+	}
 	if operationError := commandProcess.Start(); operationError != nil {
 		managerInstance.accessMutex.Unlock()
 		return nil, operationError
 	}
 	managerInstance.next++
 	terminalIdentifier := fmt.Sprintf("term-%d-%d", managerInstance.next, commandProcess.Process.Pid)
-	term := &terminal{terminalIdentifier: terminalIdentifier, commandProcess: commandProcess, output: buffer, done: make(chan struct{})}
+	term := &terminal{
+		terminalIdentifier: terminalIdentifier,
+		sessionIdentifier:  sessionIdentifier,
+		commandProcess:     commandProcess,
+		output:             buffer,
+		done:               make(chan struct{}),
+	}
 	managerInstance.entries[terminalIdentifier] = term
 	go term.wait()
 	managerInstance.accessMutex.Unlock()
 	return map[string]any{"terminalId": terminalIdentifier}, nil
 }
 
-func (managerInstance *terminalManager) get(params map[string]any) (*terminal, error) {
+func (managerInstance *terminalManager) get(params map[string]any, sessionIdentifier string) (*terminal, error) {
+	sessionIdentifier = strings.TrimSpace(sessionIdentifier)
+	if sessionIdentifier == "" {
+		return nil, errors.New("sessionId required")
+	}
 	terminalIdentifier := stringValue(params["terminalId"])
 	managerInstance.accessMutex.RLock()
 	term := managerInstance.entries[terminalIdentifier]
@@ -198,19 +234,22 @@ func (managerInstance *terminalManager) get(params map[string]any) (*terminal, e
 	if term == nil {
 		return nil, fmt.Errorf("unknown terminal %q", terminalIdentifier)
 	}
+	if term.sessionIdentifier != sessionIdentifier {
+		return nil, errors.New("terminal belongs to another session")
+	}
 	return term, nil
 }
 
-func (managerInstance *terminalManager) output(params map[string]any) (map[string]any, error) {
-	term, operationError := managerInstance.get(params)
+func (managerInstance *terminalManager) output(params map[string]any, sessionIdentifier string) (map[string]any, error) {
+	term, operationError := managerInstance.get(params, sessionIdentifier)
 	if operationError != nil {
 		return nil, operationError
 	}
 	return term.result(), nil
 }
 
-func (managerInstance *terminalManager) waitForExit(operationContext context.Context, params map[string]any) (map[string]any, error) {
-	term, operationError := managerInstance.get(params)
+func (managerInstance *terminalManager) waitForExit(operationContext context.Context, params map[string]any, sessionIdentifier string) (map[string]any, error) {
+	term, operationError := managerInstance.get(params, sessionIdentifier)
 	if operationError != nil {
 		return nil, operationError
 	}
@@ -228,8 +267,8 @@ func (managerInstance *terminalManager) waitForExit(operationContext context.Con
 	}
 }
 
-func (managerInstance *terminalManager) kill(params map[string]any) (map[string]any, error) {
-	term, operationError := managerInstance.get(params)
+func (managerInstance *terminalManager) kill(params map[string]any, sessionIdentifier string) (map[string]any, error) {
+	term, operationError := managerInstance.get(params, sessionIdentifier)
 	if operationError != nil {
 		return nil, operationError
 	}
@@ -237,12 +276,24 @@ func (managerInstance *terminalManager) kill(params map[string]any) (map[string]
 	return map[string]any{}, nil
 }
 
-func (managerInstance *terminalManager) release(params map[string]any) (map[string]any, error) {
+func (managerInstance *terminalManager) release(params map[string]any, sessionIdentifier string) (map[string]any, error) {
+	sessionIdentifier = strings.TrimSpace(sessionIdentifier)
+	if sessionIdentifier == "" {
+		return nil, errors.New("sessionId required")
+	}
 	terminalIdentifier := stringValue(params["terminalId"])
 	managerInstance.accessMutex.Lock()
 	term := managerInstance.entries[terminalIdentifier]
-	delete(managerInstance.entries, terminalIdentifier)
+	if term != nil && term.sessionIdentifier == sessionIdentifier {
+		delete(managerInstance.entries, terminalIdentifier)
+	}
 	managerInstance.accessMutex.Unlock()
+	if term == nil {
+		return nil, fmt.Errorf("unknown terminal %q", terminalIdentifier)
+	}
+	if term.sessionIdentifier != sessionIdentifier {
+		return nil, errors.New("terminal belongs to another session")
+	}
 	if term != nil {
 		term.kill()
 	}

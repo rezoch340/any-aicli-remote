@@ -6,20 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/grok-remote/grok-remote-app/backend/internal/history"
 )
 
 func TestServerSessionRoutes(testingContext *testing.T) {
 	fixture := newRouteTestServer(testingContext)
 	sessionID := "session-route-test"
-	directory := filepath.Join(fixture.server.configuration.SessionsDirectory, history.EncodeSessionWorkingDirectory(fixture.root), sessionID)
+	directory := filepath.Join(fixture.sessions, "route-project", sessionID)
 	if errorValue := os.MkdirAll(directory, 0o755); errorValue != nil {
 		testingContext.Fatal(errorValue)
 	}
 	writeRouteJSON(testingContext, filepath.Join(directory, "summary.json"), map[string]any{
-		"remote_title": "Original title",
-		"cwd":          fixture.root,
+		"info":         map[string]any{"id": sessionID, "cwd": fixture.root},
+		"remote_title": "Original title", "session_summary": "Route summary",
+		"created_at": "2026-01-01T00:00:00Z", "last_active_at": "2026-01-02T00:00:00Z",
 	})
 	writeRouteJSON(testingContext, filepath.Join(directory, "signals.json"), map[string]any{
 		"context_tokens_used": 25, "context_window_tokens": 100,
@@ -35,6 +34,34 @@ func TestServerSessionRoutes(testingContext *testing.T) {
 	line, _ := json.Marshal(update)
 	if errorValue := os.WriteFile(filepath.Join(directory, "updates.jsonl"), append(line, '\n'), 0o644); errorValue != nil {
 		testingContext.Fatal(errorValue)
+	}
+	if errorValue := os.WriteFile(filepath.Join(directory, "chat_history.jsonl"), []byte("{\"type\":\"user\",\"content\":\"hello from chat history\",\"timestamp\":1700000000}\n"), 0o644); errorValue != nil {
+		testingContext.Fatal(errorValue)
+	}
+
+	sessionsResponse := fixture.request(testingContext, http.MethodGet, "/api/sessions", nil, remotePeer, true)
+	assertStatus(testingContext, sessionsResponse, http.StatusOK)
+	sessionsBody := decodeObject(testingContext, sessionsResponse)
+	if sessionsBody["providerId"] != "grok" || sessionsBody["count"] != float64(3) {
+		testingContext.Fatalf("sessions = %#v", sessionsBody)
+	}
+	var routeMetadata map[string]any
+	for _, rawSession := range sessionsBody["sessions"].([]any) {
+		metadata, _ := rawSession.(map[string]any)
+		if metadata["sessionId"] == sessionID {
+			routeMetadata = metadata
+			break
+		}
+	}
+	if routeMetadata == nil || routeMetadata["providerId"] != "grok" || routeMetadata["projectDir"] != fixture.root || routeMetadata["title"] != "Original title" || routeMetadata["sourcePath"] == "" || routeMetadata["resumeCommand"] == "" {
+		testingContext.Fatalf("route session metadata = %#v", routeMetadata)
+	}
+	messagesResponse := fixture.request(testingContext, http.MethodGet, "/api/sessions/"+sessionID+"/messages", nil, remotePeer, true)
+	assertStatus(testingContext, messagesResponse, http.StatusOK)
+	messagesBody := decodeObject(testingContext, messagesResponse)
+	messages, _ := messagesBody["messages"].([]any)
+	if messagesBody["providerId"] != "grok" || messagesBody["count"] != float64(1) || len(messages) != 1 || messages[0].(map[string]any)["content"] != "hello from chat history" {
+		testingContext.Fatalf("messages = %#v", messagesBody)
 	}
 
 	historyResponse := fixture.request(testingContext, http.MethodGet, "/api/session/history?sessionId="+sessionID+"&chat_only=1", nil, remotePeer, true)
@@ -90,7 +117,7 @@ func TestServerSessionRouteErrors(testingContext *testing.T) {
 	missing := fixture.request(testingContext, http.MethodGet, "/api/session/history?sessionId=missing", nil, remotePeer, true)
 	assertStatus(testingContext, missing, http.StatusNotFound)
 	body := decodeObject(testingContext, missing)
-	if body["ok"] != false || body["error"] != "session dir not found" {
+	if body["ok"] != false || body["error"] != "session not found" {
 		testingContext.Fatalf("missing history = %#v", body)
 	}
 	badArchive := fixture.request(testingContext, http.MethodPost, "/api/session/archived", map[string]any{}, remotePeer, true)

@@ -1,4 +1,4 @@
-// Package server assembles the native Grok Remote HTTP/WebSocket daemon.
+// Package server assembles the Any AI CLI Remote HTTP/WebSocket daemon.
 package server
 
 import (
@@ -18,19 +18,18 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/grok-remote/grok-remote-app/backend/internal/config"
-	"github.com/grok-remote/grok-remote-app/backend/internal/fsapi"
-	"github.com/grok-remote/grok-remote-app/backend/internal/gitapi"
-	"github.com/grok-remote/grok-remote-app/backend/internal/history"
-	"github.com/grok-remote/grok-remote-app/backend/internal/hub"
-	"github.com/grok-remote/grok-remote-app/backend/internal/loops"
-	processapi "github.com/grok-remote/grok-remote-app/backend/internal/process"
-	"github.com/grok-remote/grok-remote-app/backend/internal/room"
-	"github.com/grok-remote/grok-remote-app/backend/internal/sessionapi"
-	"github.com/grok-remote/grok-remote-app/backend/internal/voice"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/config"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/hub"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/loops"
+	processapi "github.com/rezoch340/any-aicli-remote/backend/internal/process"
+	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
+	providerfactory "github.com/rezoch340/any-aicli-remote/backend/internal/provider/factory"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/room"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/sessionapi"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/voice"
 )
 
-var AlreadyRunningError = errors.New("grok remote is already running on this port")
+var AlreadyRunningError = errors.New("Any AI CLI Remote is already running on this port")
 
 type stopRequest struct {
 	keepAgent bool
@@ -49,15 +48,16 @@ type Server struct {
 	logger        *slog.Logger
 	lanIP         string
 
-	filesystem *fsapi.Service
-	git        *gitapi.Service
-	history    *history.Store
-	hub        *hub.Hub
-	process    *processapi.Manager
-	loops      *loops.Manager
-	room       *room.Store
-	session    *sessionapi.Service
-	voice      *voice.Service
+	providers       *providerapi.Registry
+	providerCatalog providerapi.Provider
+	protocol        providerapi.ProtocolAdapter
+	hub             *hub.Hub
+	process         *processapi.Manager
+	loops           *loops.Manager
+	room            *room.Store
+	session         *sessionapi.Service
+	voice           voice.Service
+	skillRoots      providerapi.SkillRootProvider
 
 	processMutex        sync.Mutex
 	agentLifecycleMutex sync.Mutex
@@ -84,43 +84,50 @@ func New(raw config.Config, logger *slog.Logger) (*Server, error) {
 	if errorValue := os.MkdirAll(configuration.DataDirectory, 0o755); errorValue != nil {
 		return nil, fmt.Errorf("create data directory: %w", errorValue)
 	}
-	filesystem, errorValue := fsapi.New(configuration.WorkingDirectory)
-	if errorValue != nil {
-		return nil, fmt.Errorf("open workspace: %w", errorValue)
+	if operationError := os.MkdirAll(configuration.RuntimeDirectory, 0o700); operationError != nil {
+		return nil, fmt.Errorf("create runtime directory: %w", operationError)
 	}
 
-	server := &Server{
-		configuration: configuration,
-		logger:        logger,
-		lanIP:         discoverLANIP(),
-		filesystem:    filesystem,
-		history:       history.NewStore(configuration.SessionsDirectory),
-		room:          room.New(configuration.DataDirectory),
-		voice:         voice.NewFromEnvironment(),
-		stopChannel:   make(chan stopRequest, 1),
+	providerComponents, errorValue := providerfactory.New(providerfactory.Configuration{
+		ProviderID:     configuration.ProviderID,
+		ExecutablePath: configuration.ProviderPath,
+		Options:        configuration.ProviderOptions,
+	})
+	if errorValue != nil {
+		return nil, errorValue
 	}
-	server.git = gitapi.New(server.filesystem.Root)
-	server.session = sessionapi.New(server.history, configuration.DataDirectory, server.filesystem.Root)
+	providerCatalog := providerComponents.Catalog
+	protocol := providerComponents.Protocol
+	providerRegistry := providerapi.NewRegistry(providerCatalog)
+
+	server := &Server{
+		configuration:   configuration,
+		logger:          logger,
+		lanIP:           discoverLANIP(),
+		providers:       providerRegistry,
+		providerCatalog: providerCatalog,
+		protocol:        protocol,
+		room:            room.New(configuration.DataDirectory),
+		voice:           providerComponents.Voice,
+		skillRoots:      providerComponents.SkillRoots,
+		stopChannel:     make(chan stopRequest, 1),
+	}
+	server.session = sessionapi.New(providerRegistry, configuration.ProviderID, configuration.DataDirectory)
 	server.process = &processapi.Manager{Config: processapi.Config{
-		Port:             configuration.AgentPort,
-		BindHost:         configuration.AgentHost,
-		Secret:           configuration.Secret,
-		WorkingDirectory: configuration.WorkingDirectory,
-		GrokPath:         configuration.GrokPath,
+		Port: configuration.AgentPort, BindHost: configuration.AgentHost, Secret: configuration.AgentSecret,
+		RuntimeDirectory: configuration.RuntimeDirectory,
 		LogDirectory:     filepath.Join(configuration.DataDirectory, "logs"),
 		StatePath:        filepath.Join(configuration.DataDirectory, "agent-state.json"),
-		AlwaysApprove:    configuration.AlwaysApprove,
-		UseLeader:        configuration.Leader,
 	}}
 
 	var ensure hub.EnsureAgentFunc
 	if configuration.EnsureAgent && isLoopbackHost(configuration.AgentHost) {
 		ensure = server.ensureAgentProcess
 	}
-	server.hub = hub.New(configuration.AgentWebSocketURL(), server.filesystem.Root, ensure, logger)
+	agentURL := protocol.AgentWebSocketURL(configuration.AgentHost, configuration.AgentPort, configuration.AgentSecret).String()
+	server.hub = hub.New(agentURL, providerCatalog, protocol, ensure, logger)
 	server.loops, errorValue = loops.New(filepath.Join(configuration.DataDirectory, "loops.json"), server.fireLoop)
 	if errorValue != nil {
-		_ = filesystem.Close()
 		return nil, fmt.Errorf("open remote loops: %w", errorValue)
 	}
 	_ = server.writeRuntimeConfig()
@@ -146,51 +153,43 @@ func normalizeConfig(configuration config.Config) (config.Config, error) {
 	if configuration.Port == configuration.AgentPort {
 		return configuration, errors.New("HTTP and agent ports must differ")
 	}
-	if strings.TrimSpace(configuration.WorkingDirectory) == "" {
-		workingDirectory, errorValue := os.Getwd()
-		if errorValue != nil {
-			return configuration, errorValue
-		}
-		configuration.WorkingDirectory = workingDirectory
+	home, _ := os.UserHomeDir()
+	if strings.TrimSpace(configuration.DataDirectory) == "" {
+		configuration.DataDirectory = filepath.Join(home, ".any-aicli-remote")
 	}
-	absolutePath, errorValue := filepath.Abs(configuration.WorkingDirectory)
+	if strings.TrimSpace(configuration.RuntimeDirectory) == "" {
+		configuration.RuntimeDirectory = filepath.Join(configuration.DataDirectory, "run")
+	}
+	absoluteRuntimeDirectory, errorValue := filepath.Abs(configuration.RuntimeDirectory)
 	if errorValue != nil {
 		return configuration, errorValue
 	}
-	if info, statusError := os.Stat(absolutePath); statusError != nil || !info.IsDir() {
-		return configuration, fmt.Errorf("workspace is not a directory: %s", absolutePath)
-	}
-	configuration.WorkingDirectory = absolutePath
-	home, _ := os.UserHomeDir()
-	if strings.TrimSpace(configuration.DataDirectory) == "" {
-		configuration.DataDirectory = filepath.Join(home, ".grok", "plugin-data", "grok-remote")
-	}
-	if strings.TrimSpace(configuration.SessionsDirectory) == "" {
-		configuration.SessionsDirectory = filepath.Join(home, ".grok", "sessions")
+	configuration.RuntimeDirectory = absoluteRuntimeDirectory
+	if strings.TrimSpace(configuration.ProviderID) == "" {
+		configuration.ProviderID = providerfactory.DefaultProviderID
 	}
 	return configuration, nil
 }
 
 func (server *Server) fireLoop(executionContext context.Context, job loops.Job, note string) error {
-	response, errorValue := server.hub.CallRPC(executionContext, "session/prompt", map[string]any{
-		"sessionId": job.SessionID,
-		"prompt":    []map[string]any{{"type": "text", "text": note}},
-	})
+	method, params := server.protocol.TextPromptRequest(job.SessionID, note)
+	response, errorValue := server.hub.CallRPC(executionContext, method, params)
 	if errorValue != nil {
 		return errorValue
 	}
 	if rpcError := response["error"]; rpcError != nil {
-		return fmt.Errorf("session/prompt: %v", rpcError)
+		return fmt.Errorf("provider prompt: %v", rpcError)
 	}
-	server.hub.Notify("_x.ai/remote/loop_fire", map[string]any{
+	method, params = server.protocol.DaemonNotification(providerapi.LoopFiredNotification, map[string]any{
 		"id": job.ID, "sessionId": job.SessionID, "fires": job.Fires + 1, "interval": job.IntervalLabel,
 	})
+	server.hub.Notify(method, params)
 	return nil
 }
 
 // Handler returns all compatibility routes behind the pairing-key middleware.
 func (server *Server) Handler() http.Handler {
-	return authMiddleware(server.configuration.Secret, server.lanIP, server.configuration.Port, server.routes())
+	return authMiddleware(server.configuration.PairingSecret, server.routes())
 }
 
 // Run starts the hub, loop scheduler, and HTTP listener and blocks until the
@@ -308,6 +307,10 @@ func (server *Server) ensureAgentProcess(executionContext context.Context) error
 	server.processMutex.Lock()
 	status := server.process.Status()
 	if !status.Listening {
+		if errorValue := server.configureProcessCommandLocked(); errorValue != nil {
+			server.processMutex.Unlock()
+			return errorValue
+		}
 		if _, errorValue := server.process.Start(false); errorValue != nil {
 			server.processMutex.Unlock()
 			return errorValue
@@ -343,6 +346,10 @@ func (server *Server) restartOwnedAgentForAuthentication(executionContext contex
 		return agentRestartAttempt{}, errors.New("owned agent is no longer available for authentication retry")
 	}
 	server.hub.DisconnectAgent("hub authentication retry")
+	if commandError := server.configureProcessCommandLocked(); commandError != nil {
+		server.processMutex.Unlock()
+		return agentRestartAttempt{}, commandError
+	}
 	restartResult, restartError := server.process.Start(true)
 	server.processMutex.Unlock()
 	attempt := agentRestartAttempt{result: restartResult, attempted: true}
@@ -365,6 +372,23 @@ func (server *Server) processStatus() processapi.Status {
 	return server.process.Status()
 }
 
+// configureProcessCommandLocked resolves provider-specific launch details at
+// start time. The caller must hold processMutex.
+func (server *Server) configureProcessCommandLocked() error {
+	command, operationError := server.protocol.AgentCommand(providerapi.AgentLaunchConfiguration{
+		Host: server.configuration.AgentHost, Port: server.configuration.AgentPort,
+		Secret: server.configuration.AgentSecret, RuntimeDirectory: server.configuration.RuntimeDirectory,
+	})
+	if operationError != nil {
+		return operationError
+	}
+	server.process.Config.ExecutablePath = command.ExecutablePath
+	server.process.Config.Arguments = append([]string(nil), command.Arguments...)
+	server.process.Config.Environment = append([]string(nil), command.Environment...)
+	server.process.Config.IdentityTokens = append([]string(nil), command.IdentityTokens...)
+	return nil
+}
+
 func (server *Server) waitForAgent(executionContext context.Context) bool {
 	address := net.JoinHostPort(server.configuration.AgentHost, strconv.Itoa(server.configuration.AgentPort))
 	ticker := time.NewTicker(250 * time.Millisecond)
@@ -385,8 +409,8 @@ func (server *Server) waitForAgent(executionContext context.Context) bool {
 	}
 }
 
-// Close releases in-process resources. It deliberately does not kill the Grok
-// agent; explicit /api/stack/stop controls that, matching server.py shutdown.
+// Close releases in-process resources. It deliberately does not kill the
+// provider agent; explicit /api/stack/stop controls that.
 func (server *Server) Close() {
 	server.closeOnce.Do(func() {
 		server.closing.Store(true)
@@ -396,7 +420,6 @@ func (server *Server) Close() {
 		server.agentLifecycleMutex.Unlock()
 		server.loops.Close()
 		server.hub.Close()
-		_ = server.filesystem.Close()
 	})
 }
 

@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"errors"
 	"net"
 	"os"
@@ -13,14 +14,15 @@ import (
 
 func TestReverseTerminalLifecycle(testInstance *testing.T) {
 	agent := newFakeAgent(testInstance)
-	hubInstance := New(agent.websocketURL(), func() string { return testInstance.TempDir() }, nil, nil)
+	workingDirectory := testInstance.TempDir()
+	hubInstance := newTestHub(agent.websocketURL(), workingDirectory, nil)
 	defer hubInstance.Close()
 	client, closeClient := connectHubClient(testInstance, hubInstance)
 	defer closeClient()
 
 	command := "printf 'hello'; exit 7"
 	created := reverseCall(testInstance, agent, "terminal-create", "terminal/create", map[string]any{
-		"command": command,
+		"sessionId": "terminal-session", "command": command,
 	})
 	createResult := rpcResult(testInstance, created)
 	terminalID, _ := createResult["terminalId"].(string)
@@ -35,7 +37,7 @@ func TestReverseTerminalLifecycle(testInstance *testing.T) {
 	}
 
 	waited := reverseCall(testInstance, agent, "terminal-wait", "terminal/wait_for_exit", map[string]any{
-		"terminalId": terminalID,
+		"sessionId": "terminal-session", "terminalId": terminalID,
 	})
 	waitResult := rpcResult(testInstance, waited)
 	if waitResult["exitCode"] != float64(7) || waitResult["signal"] != nil {
@@ -43,7 +45,7 @@ func TestReverseTerminalLifecycle(testInstance *testing.T) {
 	}
 
 	output := reverseCall(testInstance, agent, "terminal-output", "terminal/output", map[string]any{
-		"terminalId": terminalID,
+		"sessionId": "terminal-session", "terminalId": terminalID,
 	})
 	outputResult := rpcResult(testInstance, output)
 	if outputResult["output"] != "hello" || outputResult["truncated"] != false {
@@ -55,7 +57,7 @@ func TestReverseTerminalLifecycle(testInstance *testing.T) {
 	}
 
 	released := reverseCall(testInstance, agent, "terminal-release", "terminal/release", map[string]any{
-		"terminalId": terminalID,
+		"sessionId": "terminal-session", "terminalId": terminalID,
 	})
 	if result := rpcResult(testInstance, released); len(result) != 0 {
 		testInstance.Fatalf("terminal/release result = %#v", released)
@@ -63,17 +65,71 @@ func TestReverseTerminalLifecycle(testInstance *testing.T) {
 	assertNoClientRPCNotification(testInstance, client)
 }
 
+func TestReverseTerminalRejectsMissingOrDifferentSession(testInstance *testing.T) {
+	agent := newFakeAgent(testInstance)
+	hubInstance := newTestHub(agent.websocketURL(), testInstance.TempDir(), nil)
+	defer hubInstance.Close()
+	_, closeClient := connectHubClient(testInstance, hubInstance)
+	defer closeClient()
+
+	created := reverseCall(testInstance, agent, "terminal-scoped-create", "terminal/create", map[string]any{
+		"sessionId": "owner-session", "command": "printf scoped",
+	})
+	terminalID, _ := rpcResult(testInstance, created)["terminalId"].(string)
+	if terminalID == "" {
+		testInstance.Fatalf("terminal/create result = %#v", created)
+	}
+	for _, testCase := range []struct {
+		name   string
+		params map[string]any
+	}{
+		{name: "missing", params: map[string]any{"terminalId": terminalID}},
+		{name: "different", params: map[string]any{"sessionId": "other-session", "terminalId": terminalID}},
+	} {
+		testInstance.Run(testCase.name, func(testInstance *testing.T) {
+			response := reverseCall(testInstance, agent, "terminal-scoped-"+testCase.name, "terminal/output", testCase.params)
+			if response["error"] == nil {
+				testInstance.Fatalf("terminal/output crossed session boundary: %#v", response)
+			}
+		})
+	}
+
+	released := reverseCall(testInstance, agent, "terminal-scoped-release", "terminal/release", map[string]any{
+		"sessionId": "owner-session", "terminalId": terminalID,
+	})
+	if result := rpcResult(testInstance, released); len(result) != 0 {
+		testInstance.Fatalf("terminal/release result = %#v", released)
+	}
+}
+
+func TestReverseFileRejectsMissingSessionEvenInsideLoadedWorkspace(testInstance *testing.T) {
+	agent := newFakeAgent(testInstance)
+	workingDirectory := testInstance.TempDir()
+	hubInstance := newTestHub(agent.websocketURL(), workingDirectory, nil)
+	defer hubInstance.Close()
+	_, closeClient := connectHubClient(testInstance, hubInstance)
+	defer closeClient()
+
+	response := reverseCall(testInstance, agent, "unscoped-read", "fs/read_text_file", map[string]any{
+		"path": filepath.Join(workingDirectory, "inside.txt"),
+	})
+	if response["error"] == nil {
+		testInstance.Fatalf("unscoped file read was accepted: %#v", response)
+	}
+}
+
 func TestReverseFileWriteThenRead(testInstance *testing.T) {
 	agent := newFakeAgent(testInstance)
-	hubInstance := New(agent.websocketURL(), func() string { return testInstance.TempDir() }, nil, nil)
+	workingDirectory := testInstance.TempDir()
+	hubInstance := newTestHub(agent.websocketURL(), workingDirectory, nil)
 	defer hubInstance.Close()
 	client, closeClient := connectHubClient(testInstance, hubInstance)
 	defer closeClient()
 
-	path := filepath.Join(testInstance.TempDir(), "nested", "sample.txt")
+	path := filepath.Join(workingDirectory, "nested", "sample.txt")
 	content := "one\r\ntwo\nthree"
 	written := reverseCall(testInstance, agent, "fs-write", "fs/write_text_file", map[string]any{
-		"path": path, "content": content,
+		"sessionId": "file-session", "path": path, "content": content,
 	})
 	if result := rpcResult(testInstance, written); len(result) != 0 {
 		testInstance.Fatalf("fs/write_text_file result = %#v", written)
@@ -89,7 +145,7 @@ func TestReverseFileWriteThenRead(testInstance *testing.T) {
 	}
 
 	read := reverseCall(testInstance, agent, "fs-read", "fs/read_text_file", map[string]any{
-		"path": path, "line": 2, "limit": 1,
+		"sessionId": "file-session", "path": path, "line": 2, "limit": 1,
 	})
 	if result := rpcResult(testInstance, read); result["content"] != "two\n" {
 		testInstance.Fatalf("fs/read_text_file result = %#v", read)
@@ -98,28 +154,128 @@ func TestReverseFileWriteThenRead(testInstance *testing.T) {
 	assertFileClientRPC(testInstance, readNotification, "fs/read_text_file", path)
 }
 
-func TestReversePermissionAutomaticallySelectsAllowOption(testInstance *testing.T) {
+func TestReverseWorkspaceOperationsRejectBoundRootReplacement(testInstance *testing.T) {
 	agent := newFakeAgent(testInstance)
-	hubInstance := New(agent.websocketURL(), func() string { return testInstance.TempDir() }, nil, nil)
+	parentDirectory := testInstance.TempDir()
+	workingDirectory := filepath.Join(parentDirectory, "workspace")
+	originalDirectory := filepath.Join(parentDirectory, "workspace-original")
+	replacementDirectory := testInstance.TempDir()
+	if operationError := os.Mkdir(workingDirectory, 0o755); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	hubInstance := newTestHub(agent.websocketURL(), workingDirectory, nil)
 	defer hubInstance.Close()
-	client, closeClient := connectHubClient(testInstance, hubInstance)
+	_, closeClient := connectHubClient(testInstance, hubInstance)
 	defer closeClient()
+	if _, operationError := hubInstance.ResolveSessionWorkspace(context.Background(), "test", "bound-session"); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	if operationError := os.Rename(workingDirectory, originalDirectory); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	if operationError := os.Symlink(replacementDirectory, workingDirectory); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
 
-	response := reverseCall(testInstance, agent, "permission", "session/request_permission", map[string]any{
+	outsideFile := filepath.Join(replacementDirectory, "escaped.txt")
+	writeResponse := reverseCall(testInstance, agent, "root-replaced-write", "fs/write_text_file", map[string]any{
+		"sessionId": "bound-session", "path": outsideFile, "content": "escaped",
+	})
+	if writeResponse["error"] == nil {
+		testInstance.Fatalf("file write accepted replacement workspace: %#v", writeResponse)
+	}
+	if _, operationError := os.Stat(outsideFile); !errors.Is(operationError, os.ErrNotExist) {
+		testInstance.Fatalf("replacement workspace was written: %v", operationError)
+	}
+	terminalResponse := reverseCall(testInstance, agent, "root-replaced-terminal", "terminal/create", map[string]any{
+		"sessionId": "bound-session", "command": "pwd",
+	})
+	if terminalResponse["error"] == nil {
+		testInstance.Fatalf("terminal accepted replacement workspace: %#v", terminalResponse)
+	}
+}
+
+func TestReversePermissionRoutesOnlyToSubscribedSessionClient(testInstance *testing.T) {
+	agent := newFakeAgent(testInstance)
+	hubInstance := newTestHub(agent.websocketURL(), testInstance.TempDir(), nil)
+	defer hubInstance.Close()
+	subscribedClient, closeSubscribedClient := connectHubClient(testInstance, hubInstance)
+	defer closeSubscribedClient()
+	hubInstance.stateMutex.Lock()
+	var subscribedServerClient *clientConnection
+	for connectedClient := range hubInstance.clients {
+		subscribedServerClient = connectedClient
+	}
+	if subscribedServerClient == nil {
+		hubInstance.stateMutex.Unlock()
+		testInstance.Fatal("subscribed server connection missing")
+	}
+	hubInstance.subscribeSessionClientLocked(subscribedServerClient, "test", "permission-session")
+	hubInstance.stateMutex.Unlock()
+	unrelatedClient, closeUnrelatedClient := connectHubClient(testInstance, hubInstance)
+	defer closeUnrelatedClient()
+
+	agent.send(testInstance, map[string]any{"jsonrpc": "2.0", "id": "permission", "method": "session/request_permission", "params": map[string]any{
+		"sessionId": "permission-session",
 		"options": []any{
 			map[string]any{"optionId": "deny_once"},
 			map[string]any{"optionId": "approve_once"},
 		},
 		"toolCall": map[string]any{"title": "Read project files"},
-	})
+	}})
+	permissionRequest := readMethod(testInstance, subscribedClient, "session/request_permission")
+	params := rpcParams(testInstance, permissionRequest)
+	clientPermissionIdentifier, valid := numericID(permissionRequest["id"])
+	if !valid || params["providerId"] != "test" || params["sessionId"] != "permission-session" {
+		testInstance.Fatalf("scoped permission request = %#v", permissionRequest)
+	}
+
+	if operationError := unrelatedClient.WriteJSON(map[string]any{
+		"jsonrpc": "2.0", "id": clientPermissionIdentifier,
+		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "approve_once"}},
+	}); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	select {
+	case unexpected := <-agent.messages:
+		if unexpected["method"] == nil && idKey(unexpected["id"]) == idKey("permission") {
+			testInstance.Fatalf("unrelated client answered permission: %#v", unexpected)
+		}
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if operationError := subscribedClient.WriteJSON(map[string]any{
+		"jsonrpc": "2.0", "id": clientPermissionIdentifier,
+		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "deny_once"}},
+	}); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	response := readAgentResponse(testInstance, agent, "permission")
 	outcome, _ := rpcResult(testInstance, response)["outcome"].(map[string]any)
-	if outcome["outcome"] != "selected" || outcome["optionId"] != "approve_once" {
+	if outcome["outcome"] != "selected" || outcome["optionId"] != "deny_once" {
 		testInstance.Fatalf("permission result = %#v", response)
 	}
-	notification := readMethod(testInstance, client, "_x.ai/remote/auto_permission")
-	params := rpcParams(testInstance, notification)
-	if params["optionId"] != "approve_once" || params["tool"] != "Read project files" {
-		testInstance.Fatalf("auto_permission params = %#v", params)
+	if hubInstance.reverseActive.Load() != 0 {
+		testInstance.Fatalf("permission request entered local reverse worker: %d", hubInstance.reverseActive.Load())
+	}
+}
+
+func TestReversePermissionWithoutMatchingClientCancels(testInstance *testing.T) {
+	agent := newFakeAgent(testInstance)
+	hubInstance := newTestHub(agent.websocketURL(), testInstance.TempDir(), nil)
+	defer hubInstance.Close()
+	ensureContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if operationError := hubInstance.Ensure(ensureContext); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	response := reverseCall(testInstance, agent, "unattended-permission", "session/request_permission", map[string]any{
+		"sessionId": "unattended-session",
+		"options":   []any{map[string]any{"optionId": "approve_once"}},
+	})
+	outcome, _ := rpcResult(testInstance, response)["outcome"].(map[string]any)
+	if outcome["outcome"] != "cancelled" || outcome["optionId"] != nil {
+		testInstance.Fatalf("unattended permission result = %#v", response)
 	}
 }
 
@@ -136,6 +292,23 @@ func reverseCall(testInstance *testing.T, agent *fakeAgent, requestIdentifier, m
 			}
 		case <-timer.C:
 			testInstance.Fatalf("timed out waiting for reverse response id %q", requestIdentifier)
+			return nil
+		}
+	}
+}
+
+func readAgentResponse(testInstance *testing.T, agent *fakeAgent, requestIdentifier any) map[string]any {
+	testInstance.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case response := <-agent.messages:
+			if response["method"] == nil && idKey(response["id"]) == idKey(requestIdentifier) {
+				return response
+			}
+		case <-timer.C:
+			testInstance.Fatalf("timed out waiting for reverse response id %v", requestIdentifier)
 			return nil
 		}
 	}

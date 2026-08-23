@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/fsapi"
 )
 
 func TestGitStatusDiffLogAndProject(testContext *testing.T) {
@@ -122,6 +124,37 @@ func TestProjectSkipsEscapingSymlink(testContext *testing.T) {
 	}
 	if len(project.Files) != 0 {
 		testContext.Fatalf("files = %#v", project.Files)
+	}
+}
+
+func TestPinnedGitWorkspaceRejectsReplacement(testContext *testing.T) {
+	gitPath, operationError := exec.LookPath("git")
+	if operationError != nil {
+		testContext.Skip("git not installed")
+	}
+	parentDirectory := testContext.TempDir()
+	workspacePath := filepath.Join(parentDirectory, "workspace")
+	originalPath := filepath.Join(parentDirectory, "workspace-original")
+	replacementPath := testContext.TempDir()
+	if operationError := os.Mkdir(workspacePath, 0o755); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	rootIdentity, operationError := fsapi.PinRoot(workspacePath)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	service := NewWithPinnedGit(rootIdentity, gitPath)
+	if operationError := os.Rename(workspacePath, originalPath); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if operationError := os.Symlink(replacementPath, workspacePath); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if _, operationError := service.Status(context.Background()); !errors.Is(operationError, WorkspaceUnavailableError) {
+		testContext.Fatalf("git status replacement error = %v", operationError)
+	}
+	if _, operationError := service.Project(context.Background()); !errors.Is(operationError, WorkspaceUnavailableError) {
+		testContext.Fatalf("git project replacement error = %v", operationError)
 	}
 }
 

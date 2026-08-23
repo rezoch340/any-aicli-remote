@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,7 +15,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	processapi "github.com/grok-remote/grok-remote-app/backend/internal/process"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/loops"
+	processapi "github.com/rezoch340/any-aicli-remote/backend/internal/process"
 )
 
 type delayedAgentOS struct {
@@ -27,6 +31,8 @@ type delayedAgentOS struct {
 	server            *http.Server
 	connections       map[*websocket.Conn]struct{}
 	started           chan struct{}
+	received          chan []byte
+	newSessionID      string
 	startedOnce       sync.Once
 	serveError        error
 }
@@ -34,7 +40,7 @@ type delayedAgentOS struct {
 func newDelayedAgentOS(port int) *delayedAgentOS {
 	return &delayedAgentOS{
 		port: port, commands: map[int]string{}, alive: map[int]bool{}, stamps: map[int]string{},
-		connections: map[*websocket.Conn]struct{}{}, started: make(chan struct{}),
+		connections: map[*websocket.Conn]struct{}{}, started: make(chan struct{}), received: make(chan []byte, 8),
 	}
 }
 
@@ -63,7 +69,6 @@ func (delayedAgentEnvironment *delayedAgentOS) operations() processapi.Operation
 			defer delayedAgentEnvironment.mutex.Unlock()
 			return delayedAgentEnvironment.stamps[processID], nil
 		},
-		FindGrok: func() (string, error) { return "/usr/local/bin/grok", nil },
 		StartProcess: func(startSpecification processapi.StartSpecification) (int, error) {
 			delayedAgentEnvironment.mutex.Lock()
 			delayedAgentEnvironment.starts++
@@ -112,8 +117,20 @@ func (delayedAgentEnvironment *delayedAgentOS) serveAfterDelay(processID int) {
 			_ = connection.Close()
 		}()
 		for {
-			if _, _, readError := connection.ReadMessage(); readError != nil {
+			_, payload, readError := connection.ReadMessage()
+			if readError != nil {
 				return
+			}
+			select {
+			case delayedAgentEnvironment.received <- payload:
+			default:
+			}
+			var request map[string]any
+			if delayedAgentEnvironment.newSessionID != "" && json.Unmarshal(payload, &request) == nil && request["method"] == "session/new" && request["id"] != nil {
+				_ = connection.WriteJSON(map[string]any{
+					"jsonrpc": "2.0", "id": request["id"],
+					"result": map[string]any{"sessionId": delayedAgentEnvironment.newSessionID},
+				})
 			}
 		}
 	})
@@ -206,6 +223,136 @@ func TestConcurrentStackStartAndEnsureSpawnAgentOnce(testingContext *testing.T) 
 	}
 	if starts, serveError := fake.startCount(); serveError != nil || starts != 1 {
 		testingContext.Fatalf("agent starts = %d, serve error = %v; want exactly one spawn", starts, serveError)
+	}
+}
+
+func TestStartingAgentDoesNotCreateLoadOrResumeSession(testingContext *testing.T) {
+	port := freeAgentPort(testingContext)
+	fixture := newRouteTestServerWithAgentPort(testingContext, port)
+	fake := newDelayedAgentOS(port)
+	fixture.server.process.Operations = fake.operations()
+	testingContext.Cleanup(fake.close)
+
+	operationContext, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	operationError := fixture.server.ensureAgentProcess(operationContext)
+	cancel()
+	if operationError != nil {
+		testingContext.Fatal(operationError)
+	}
+	select {
+	case payload := <-fake.received:
+		testingContext.Fatalf("idle startup sent provider RPC: %s", payload)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestServerRunWithPersistedLoopDoesNotSendProviderRPCAtStartup(testingContext *testing.T) {
+	agentPort := freeAgentPort(testingContext)
+	serverPort := freeAgentPort(testingContext)
+	fixture := newRouteTestServerWithAgentPort(testingContext, agentPort)
+	fake := newDelayedAgentOS(agentPort)
+	fixture.server.process.Operations = fake.operations()
+	fixture.server.configuration.Port = serverPort
+	fixture.server.configuration.EnsureAgent = true
+	testingContext.Cleanup(fake.close)
+
+	if _, operationError := fixture.server.loops.Create("persisted-session", "scheduled prompt", loops.MinInterval, "", ""); operationError != nil {
+		testingContext.Fatal(operationError)
+	}
+	executionContext, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() {
+		runResult <- fixture.server.Run(executionContext)
+	}()
+	select {
+	case <-fake.started:
+	case <-time.After(2 * time.Second):
+		cancel()
+		testingContext.Fatal("daemon did not start its idle provider service")
+	}
+
+	select {
+	case payload := <-fake.received:
+		cancel()
+		testingContext.Fatalf("daemon startup sent provider RPC for persisted loop: %s", payload)
+	case <-time.After(400 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case operationError := <-runResult:
+		if operationError != nil {
+			testingContext.Fatalf("daemon run returned error: %v", operationError)
+		}
+	case <-time.After(3 * time.Second):
+		testingContext.Fatal("daemon did not stop after context cancellation")
+	}
+}
+
+func TestNewSessionAppearsInSessionsEndpointBeforeProviderPersistence(testingContext *testing.T) {
+	port := freeAgentPort(testingContext)
+	fixture := newRouteTestServerWithAgentPort(testingContext, port)
+	fake := newDelayedAgentOS(port)
+	fake.newSessionID = "active-session-without-summary"
+	fixture.server.process.Operations = fake.operations()
+	testingContext.Cleanup(fake.close)
+
+	startResponse := fixture.request(testingContext, http.MethodPost, "/api/stack/start", map[string]any{}, remotePeer, true)
+	assertStatus(testingContext, startResponse, http.StatusOK)
+	httpServer := httptest.NewServer(fixture.handler)
+	defer httpServer.Close()
+	websocketURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws?key=" + routeTestSecret
+	connection, _, operationError := websocket.DefaultDialer.Dial(websocketURL, nil)
+	if operationError != nil {
+		testingContext.Fatal(operationError)
+	}
+	defer connection.Close()
+	workspace := testingContext.TempDir()
+	if operationError := connection.WriteJSON(map[string]any{
+		"jsonrpc": "2.0", "id": "mobile-new", "method": "session/new", "params": map[string]any{"cwd": workspace},
+	}); operationError != nil {
+		testingContext.Fatal(operationError)
+	}
+	_ = connection.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		var response map[string]any
+		if operationError := connection.ReadJSON(&response); operationError != nil {
+			testingContext.Fatal(operationError)
+		}
+		if response["id"] == "mobile-new" && response["method"] == nil {
+			if response["error"] != nil {
+				testingContext.Fatalf("new session response = %#v", response)
+			}
+			break
+		}
+	}
+
+	sessionsResponse := fixture.request(testingContext, http.MethodGet, "/api/sessions", nil, remotePeer, true)
+	assertStatus(testingContext, sessionsResponse, http.StatusOK)
+	sessionsBody := decodeObject(testingContext, sessionsResponse)
+	if sessionsBody["providerId"] != "grok" {
+		testingContext.Fatalf("providerId = %#v", sessionsBody["providerId"])
+	}
+	canonicalWorkspace, _ := filepath.EvalSymlinks(workspace)
+	found := false
+	for _, rawSession := range sessionsBody["sessions"].([]any) {
+		metadata, _ := rawSession.(map[string]any)
+		if metadata["sessionId"] == fake.newSessionID {
+			found = metadata["providerId"] == "grok" && metadata["projectDir"] == canonicalWorkspace
+			break
+		}
+	}
+	if !found {
+		testingContext.Fatalf("active session missing before summary persistence: %#v", sessionsBody)
+	}
+	messagesResponse := fixture.request(testingContext, http.MethodGet, "/api/sessions/"+fake.newSessionID+"/messages?providerId=grok", nil, remotePeer, true)
+	assertStatus(testingContext, messagesResponse, http.StatusOK)
+	messagesBody := decodeObject(testingContext, messagesResponse)
+	if messagesBody["providerId"] != "grok" || messagesBody["sessionId"] != fake.newSessionID || messagesBody["count"] != float64(0) {
+		testingContext.Fatalf("active session messages response = %#v", messagesBody)
+	}
+	messageSession, _ := messagesBody["session"].(map[string]any)
+	if messageSession["projectDir"] != canonicalWorkspace {
+		testingContext.Fatalf("active session message metadata = %#v", messageSession)
 	}
 }
 

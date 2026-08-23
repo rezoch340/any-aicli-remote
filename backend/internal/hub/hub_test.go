@@ -76,6 +76,18 @@ func (fixture *fakeAgent) send(testInstance *testing.T, object map[string]any) {
 	}
 }
 
+func (fixture *fakeAgent) disconnect(testInstance *testing.T) {
+	testInstance.Helper()
+	select {
+	case connection := <-fixture.connection:
+		if operationError := connection.Close(); operationError != nil {
+			testInstance.Fatalf("fake agent disconnect: %v", operationError)
+		}
+	case <-time.After(2 * time.Second):
+		testInstance.Fatal("fake agent did not connect")
+	}
+}
+
 func connectHubClient(testInstance *testing.T, hubInstance *Hub) (*websocket.Conn, func()) {
 	testInstance.Helper()
 	server := httptest.NewServer(http.HandlerFunc(hubInstance.HandleWebSocket))
@@ -88,6 +100,25 @@ func connectHubClient(testInstance *testing.T, hubInstance *Hub) (*websocket.Con
 		_ = connection.Close()
 		server.Close()
 	}
+}
+
+func TestHandleWebSocketRejectsCrossSiteBrowserOrigin(testInstance *testing.T) {
+	hubInstance := newTestHub("ws://127.0.0.1:1", testInstance.TempDir(), nil)
+	defer hubInstance.Close()
+	server := httptest.NewServer(http.HandlerFunc(hubInstance.HandleWebSocket))
+	defer server.Close()
+	headers := http.Header{"Origin": {"https://attacker.example"}}
+	connection, response, operationError := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(server.URL, "http"), headers,
+	)
+	if connection != nil {
+		_ = connection.Close()
+		testInstance.Fatal("cross-site WebSocket origin was accepted")
+	}
+	if operationError == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		testInstance.Fatalf("cross-site upgrade error=%v response=%v", operationError, response)
+	}
+	_ = response.Body.Close()
 }
 
 func readObject(testInstance *testing.T, connection *websocket.Conn) map[string]any {
@@ -128,7 +159,8 @@ func readResponse(testInstance *testing.T, connection *websocket.Conn, requestId
 
 func TestHubRemapsIDsCachesInitializeAndReportsDetachedCompletion(testInstance *testing.T) {
 	agent := newFakeAgent(testInstance)
-	hubInstance := New(agent.websocketURL(), func() string { return testInstance.TempDir() }, nil, nil)
+	workingDirectory := testInstance.TempDir()
+	hubInstance := newTestHub(agent.websocketURL(), workingDirectory, nil)
 	defer hubInstance.Close()
 
 	first, closeFirst := connectHubClient(testInstance, hubInstance)
@@ -173,7 +205,7 @@ func TestHubRemapsIDsCachesInitializeAndReportsDetachedCompletion(testInstance *
 	}
 
 	if operationError := first.WriteJSON(map[string]any{
-		"jsonrpc": "2.0", "id": "turn-1", "method": "session/prompt", "params": map[string]any{},
+		"jsonrpc": "2.0", "id": "turn-1", "method": "session/prompt", "params": map[string]any{"sessionId": "test-session"},
 	}); operationError != nil {
 		testInstance.Fatal(operationError)
 	}
@@ -195,23 +227,158 @@ func TestHubRemapsIDsCachesInitializeAndReportsDetachedCompletion(testInstance *
 	}
 }
 
+func TestHubAddsProviderIdentityToSessionNotification(testInstance *testing.T) {
+	agent := newFakeAgent(testInstance)
+	hubInstance := newTestHub(agent.websocketURL(), testInstance.TempDir(), nil)
+	defer hubInstance.Close()
+	client, closeClient := connectHubClient(testInstance, hubInstance)
+	defer closeClient()
+
+	agent.send(testInstance, map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "session/update",
+		"params":  map[string]any{"sessionId": "session-notification", "update": map[string]any{"kind": "agent_message_chunk"}},
+	})
+	notification := readMethod(testInstance, client, "session/update")
+	params := rpcParams(testInstance, notification)
+	if params["providerId"] != "test" || params["sessionId"] != "session-notification" {
+		testInstance.Fatalf("session notification scope = %#v", params)
+	}
+}
+
+func TestNewSessionBindingWorksBeforeProviderHistoryPersistsAndDoesNotCrossWorkspaces(testInstance *testing.T) {
+	agent := newFakeAgent(testInstance)
+	firstWorkspace := testInstance.TempDir()
+	secondWorkspace := testInstance.TempDir()
+	providerInstance := &testProvider{sessionDirectories: map[string]string{}}
+	hubInstance := New(agent.websocketURL(), providerInstance, providerInstance, nil, nil)
+	defer hubInstance.Close()
+	client, closeClient := connectHubClient(testInstance, hubInstance)
+	defer closeClient()
+
+	createSession := func(requestIdentifier, sessionID, workingDirectory string) {
+		testInstance.Helper()
+		if operationError := client.WriteJSON(map[string]any{
+			"jsonrpc": "2.0", "id": requestIdentifier, "method": "session/new",
+			"params": map[string]any{"cwd": workingDirectory},
+		}); operationError != nil {
+			testInstance.Fatal(operationError)
+		}
+		request := <-agent.messages
+		requestID, valid := numericID(request["id"])
+		if !valid {
+			testInstance.Fatalf("new session id was not remapped: %#v", request)
+		}
+		params, _ := request["params"].(map[string]any)
+		canonicalWorkspace, _ := filepath.EvalSymlinks(workingDirectory)
+		if params["cwd"] != canonicalWorkspace {
+			testInstance.Fatalf("new session cwd = %#v, want %q", params["cwd"], canonicalWorkspace)
+		}
+		agent.send(testInstance, map[string]any{
+			"jsonrpc": "2.0", "id": requestID, "result": map[string]any{"sessionId": sessionID},
+		})
+		response := readResponse(testInstance, client, requestIdentifier)
+		if response["error"] != nil {
+			testInstance.Fatalf("new session response = %#v", response)
+		}
+	}
+
+	createSession("new-first", "new-session-first", firstWorkspace)
+	activeSessions, operationError := hubInstance.ActiveSessions("test")
+	canonicalFirstWorkspace, _ := filepath.EvalSymlinks(firstWorkspace)
+	if operationError != nil || len(activeSessions) != 1 || activeSessions[0].SessionID != "new-session-first" || activeSessions[0].ProjectDirectory != canonicalFirstWorkspace {
+		testInstance.Fatalf("active sessions before provider persistence = %#v, error = %v", activeSessions, operationError)
+	}
+	if operationError := client.WriteJSON(map[string]any{
+		"jsonrpc": "2.0", "id": "prompt-first", "method": "session/prompt",
+		"params": map[string]any{"sessionId": "new-session-first", "prompt": "hello"},
+	}); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	promptRequest := <-agent.messages
+	promptID, valid := numericID(promptRequest["id"])
+	if !valid {
+		testInstance.Fatalf("prompt did not reach agent: %#v", promptRequest)
+	}
+	agent.send(testInstance, map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]any{"ok": true}})
+	if response := readResponse(testInstance, client, "prompt-first"); response["error"] != nil {
+		testInstance.Fatalf("prompt response = %#v", response)
+	}
+	agent.send(testInstance, map[string]any{
+		"jsonrpc": "2.0", "id": "permission-first", "method": "session/request_permission",
+		"params": map[string]any{
+			"sessionId": "new-session-first",
+			"options":   []any{map[string]any{"optionId": "deny_once"}},
+		},
+	})
+	permissionRequest := readMethod(testInstance, client, "session/request_permission")
+	permissionParams := rpcParams(testInstance, permissionRequest)
+	if permissionParams["providerId"] != "test" || permissionParams["sessionId"] != "new-session-first" {
+		testInstance.Fatalf("new session permission scope = %#v", permissionParams)
+	}
+	clientPermissionIdentifier, valid := numericID(permissionRequest["id"])
+	if !valid {
+		testInstance.Fatalf("new session permission request id = %#v", permissionRequest["id"])
+	}
+	if operationError := client.WriteJSON(map[string]any{
+		"jsonrpc": "2.0", "id": clientPermissionIdentifier,
+		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "deny_once"}},
+	}); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	permissionResponse := readAgentResponse(testInstance, agent, "permission-first")
+	permissionOutcome, _ := rpcResult(testInstance, permissionResponse)["outcome"].(map[string]any)
+	if permissionOutcome["optionId"] != "deny_once" {
+		testInstance.Fatalf("new session permission response = %#v", permissionResponse)
+	}
+
+	firstPath := filepath.Join(firstWorkspace, "first.txt")
+	if response := reverseCall(testInstance, agent, "write-first", "fs/write_text_file", map[string]any{
+		"sessionId": "new-session-first", "path": firstPath, "content": "first",
+	}); len(rpcResult(testInstance, response)) != 0 {
+		testInstance.Fatalf("first write response = %#v", response)
+	}
+	createSession("new-second", "new-session-second", secondWorkspace)
+
+	crossedPath := filepath.Join(secondWorkspace, "crossed.txt")
+	crossedResponse := reverseCall(testInstance, agent, "write-crossed", "fs/write_text_file", map[string]any{
+		"sessionId": "new-session-first", "path": crossedPath, "content": "crossed",
+	})
+	if crossedResponse["error"] == nil {
+		testInstance.Fatalf("first session wrote into second workspace: %#v", crossedResponse)
+	}
+	if _, operationError := os.Stat(crossedPath); !os.IsNotExist(operationError) {
+		testInstance.Fatalf("cross-workspace path exists after rejected write: %v", operationError)
+	}
+	if response := reverseCall(testInstance, agent, "write-second", "fs/write_text_file", map[string]any{
+		"sessionId": "new-session-second", "path": crossedPath, "content": "second",
+	}); len(rpcResult(testInstance, response)) != 0 {
+		testInstance.Fatalf("second write response = %#v", response)
+	}
+	secondContent, operationError := os.ReadFile(crossedPath)
+	if operationError != nil || string(secondContent) != "second" {
+		testInstance.Fatalf("second workspace content = %q, error = %v", secondContent, operationError)
+	}
+}
+
 func TestReadTextFileKeepsLineEndingsAndHonorsExplicitZeroLimit(testInstance *testing.T) {
-	path := filepath.Join(testInstance.TempDir(), "sample.txt")
+	workingDirectory := testInstance.TempDir()
+	path := filepath.Join(workingDirectory, "sample.txt")
 	if operationError := os.WriteFile(path, []byte("one\r\ntwo\nthree"), 0o644); operationError != nil {
 		testInstance.Fatal(operationError)
 	}
-	result, operationError := readTextFile(map[string]any{"path": path, "line": 2, "limit": 1})
+	result, operationError := readTextFile(map[string]any{"path": path, "line": 2, "limit": 1}, workingDirectory)
 	if operationError != nil {
 		testInstance.Fatal(operationError)
 	}
 	if result["content"] != "two\n" {
 		testInstance.Fatalf("content = %q", result["content"])
 	}
-	result, operationError = readTextFile(map[string]any{"path": path, "limit": 0})
+	result, operationError = readTextFile(map[string]any{"path": path, "limit": 0}, workingDirectory)
 	if operationError != nil || result["content"] != "" {
 		testInstance.Fatalf("zero limit result=%#v err=%v", result, operationError)
 	}
-	result, operationError = readTextFile(map[string]any{"path": path, "line": 3})
+	result, operationError = readTextFile(map[string]any{"path": path, "line": 3}, workingDirectory)
 	if operationError != nil || result["content"] != "three" {
 		testInstance.Fatalf("final line result=%#v err=%v", result, operationError)
 	}
@@ -225,10 +392,10 @@ func TestNumericIDRejectsFraction(testInstance *testing.T) {
 
 func TestClosePreventsInFlightEnsureFromStartingAgent(testInstance *testing.T) {
 	var starts atomic.Int32
-	hubInstance := New("ws://127.0.0.1:1/ws", func() string { return "" }, func(context.Context) error {
+	hubInstance := newTestHub("ws://127.0.0.1:1/ws", "", func(context.Context) error {
 		starts.Add(1)
 		return nil
-	}, nil)
+	})
 	done := make(chan error, 1)
 	go func() { done <- hubInstance.Ensure(context.Background()) }()
 	// The first failed dial sleeps before attempt two, which is the attempt that

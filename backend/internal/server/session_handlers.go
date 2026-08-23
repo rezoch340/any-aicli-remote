@@ -6,8 +6,87 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/grok-remote/grok-remote-app/backend/internal/sessionapi"
+	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/sessionapi"
 )
+
+func (server *Server) handleSessions(responseWriter http.ResponseWriter, request *http.Request) {
+	providerID := strings.TrimSpace(request.URL.Query().Get("providerId"))
+	if providerID == "" {
+		providerID = server.configuration.ProviderID
+	}
+	sessions, operationError := server.providers.ScanSessions(request.Context(), providerID)
+	if operationError != nil {
+		if errors.Is(operationError, providerapi.ProviderNotFoundError) {
+			writeAPIError(responseWriter, http.StatusNotFound, operationError)
+		} else {
+			writeAPIError(responseWriter, http.StatusInternalServerError, operationError)
+		}
+		return
+	}
+	activeSessions, operationError := server.hub.ActiveSessions(providerID)
+	if operationError != nil {
+		writeAPIError(responseWriter, http.StatusNotFound, operationError)
+		return
+	}
+	sessions = providerapi.MergeSessionMetadata(sessions, activeSessions)
+	writeJSON(responseWriter, http.StatusOK, map[string]any{"ok": true, "providerId": providerID, "sessions": sessions, "count": len(sessions)})
+}
+
+func (server *Server) handleSessionMessages(responseWriter http.ResponseWriter, request *http.Request) {
+	providerID := strings.TrimSpace(request.URL.Query().Get("providerId"))
+	if providerID == "" {
+		providerID = server.configuration.ProviderID
+	}
+	providerInstance, operationError := server.providers.Provider(providerID)
+	if operationError != nil {
+		writeAPIError(responseWriter, http.StatusNotFound, operationError)
+		return
+	}
+	sessionID := strings.TrimSpace(request.PathValue("sessionID"))
+	if sessionID == "" {
+		writeAPIError(responseWriter, http.StatusBadRequest, providerapi.SessionRequiredError)
+		return
+	}
+	activeSessions, operationError := server.hub.ActiveSessions(providerID)
+	if operationError != nil {
+		writeAPIError(responseWriter, http.StatusNotFound, operationError)
+		return
+	}
+	catalogMetadata, catalogError := providerInstance.ResolveSession(request.Context(), sessionID)
+	if catalogError != nil && !errors.Is(catalogError, providerapi.SessionNotFoundError) {
+		writeAPIError(responseWriter, http.StatusInternalServerError, catalogError)
+		return
+	}
+	catalogSessions := make([]providerapi.SessionMetadata, 0, 1)
+	if catalogError == nil {
+		catalogSessions = append(catalogSessions, catalogMetadata)
+	}
+	mergedSessions := providerapi.MergeSessionMetadata(catalogSessions, activeSessions)
+	var metadata providerapi.SessionMetadata
+	for _, candidate := range mergedSessions {
+		if candidate.ProviderID == providerID && candidate.SessionID == sessionID {
+			metadata = candidate
+			break
+		}
+	}
+	if metadata.SessionID == "" {
+		writeAPIError(responseWriter, http.StatusNotFound, providerapi.SessionNotFoundError)
+		return
+	}
+	messages := []providerapi.Message{}
+	if catalogError == nil {
+		messages, operationError = providerInstance.LoadMessages(request.Context(), sessionID)
+	}
+	if operationError != nil {
+		writeAPIError(responseWriter, http.StatusInternalServerError, operationError)
+		return
+	}
+	writeJSON(responseWriter, http.StatusOK, map[string]any{
+		"ok": true, "providerId": providerID, "sessionId": sessionID,
+		"session": metadata, "messages": messages, "count": len(messages),
+	})
+}
 
 func (server *Server) handleSessionHistory(responseWriter http.ResponseWriter, request *http.Request) {
 	query := request.URL.Query()
@@ -38,14 +117,14 @@ func (server *Server) handleSessionHistory(responseWriter http.ResponseWriter, r
 		maxBytes = int64Query(query.Get("max_bytes"), fallback)
 	}
 	result, errorValue := server.session.History(request.Context(), sessionapi.HistoryQuery{
-		SessionID:        sessionID,
-		WorkingDirectory: firstNonEmpty(query.Get("cwd"), server.filesystem.Root()),
-		Live:             live,
-		Limit:            limit,
-		SinceBytes:       since,
-		BeforeBytes:      before,
-		MaxBytes:         maxBytes,
-		ChatOnly:         parseBool(firstNonEmpty(query.Get("chat_only"), query.Get("messages"))),
+		ProviderID:  query.Get("providerId"),
+		SessionID:   sessionID,
+		Live:        live,
+		Limit:       limit,
+		SinceBytes:  since,
+		BeforeBytes: before,
+		MaxBytes:    maxBytes,
+		ChatOnly:    parseBool(firstNonEmpty(query.Get("chat_only"), query.Get("messages"))),
 	})
 	if errorValue != nil {
 		switch {
@@ -69,7 +148,7 @@ func (server *Server) handleSessionTitles(responseWriter http.ResponseWriter, re
 		raw = body["sessionIds"]
 	}
 	ids := stringList(raw)
-	result, errorValue := server.session.Titles(ids, firstNonEmpty(stringValue(body["cwd"]), server.filesystem.Root()))
+	result, errorValue := server.session.Titles(request.Context(), stringValue(body["providerId"]), ids)
 	if errorValue != nil {
 		writeAPIError(responseWriter, http.StatusInternalServerError, errorValue)
 		return
@@ -80,7 +159,7 @@ func (server *Server) handleSessionTitles(responseWriter http.ResponseWriter, re
 func (server *Server) handleSessionSignals(responseWriter http.ResponseWriter, request *http.Request) {
 	query := request.URL.Query()
 	sessionID := firstNonEmpty(query.Get("sessionId"), query.Get("id"))
-	result, errorValue := server.session.Signals(sessionID, firstNonEmpty(query.Get("cwd"), server.filesystem.Root()))
+	result, errorValue := server.session.Signals(request.Context(), query.Get("providerId"), sessionID)
 	if errorValue != nil {
 		switch {
 		case errors.Is(errorValue, sessionapi.SessionRequiredError):
@@ -138,10 +217,7 @@ func (server *Server) handleSessionRename(responseWriter http.ResponseWriter, re
 	if errorValue := decodeJSON(responseWriter, request, &renameRequest, false); errorValue != nil {
 		return
 	}
-	if strings.TrimSpace(renameRequest.WorkingDirectory) == "" {
-		renameRequest.WorkingDirectory = server.filesystem.Root()
-	}
-	result, errorValue := server.session.Rename(renameRequest)
+	result, errorValue := server.session.Rename(request.Context(), renameRequest)
 	if errorValue != nil {
 		switch {
 		case errors.Is(errorValue, sessionapi.SessionRequiredError), errors.Is(errorValue, sessionapi.TitleRequiredError):

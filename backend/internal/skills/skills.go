@@ -1,14 +1,19 @@
-// Package skills scans Grok/Codex-style SKILL.md and command markdown metadata.
+// Package skills scans explicitly configured SKILL.md and command markdown roots.
 package skills
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
+	"go.yaml.in/yaml/v4"
 )
 
-// Item is the JSON shape exposed by the old Python /api/skills/list endpoint.
+// Item is the JSON shape exposed by the compatibility /api/skills/list endpoint.
 type Item struct {
 	Name          string `json:"name"`
 	Description   string `json:"description"`
@@ -21,119 +26,44 @@ type Item struct {
 	Invoke        string `json:"invoke"`
 }
 
-// Frontmatter is a deliberately small YAML-frontmatter parser matching server.py.
-type Frontmatter map[string]string
+// Frontmatter contains the metadata fields consumed by the skills endpoint.
+// YAML syntax and scalar decoding are delegated to go-yaml.
+type Frontmatter struct {
+	Name          string `yaml:"name"`
+	Description   string `yaml:"description"`
+	When          string `yaml:"when-to-use"`
+	Hint          string `yaml:"argument-hint"`
+	UserInvocable *bool  `yaml:"user-invocable"`
+}
 
-// ParseFrontmatter parses a leading --- frontmatter block and returns metadata plus body.
-// It supports simple key: value lines and indented block-scalar continuations.
-func ParseFrontmatter(text string) (Frontmatter, string) {
-	meta := Frontmatter{}
-	body := text
-	if !strings.HasPrefix(text, "---") {
-		return meta, body
+// ParseFrontmatter extracts a leading YAML frontmatter block. Only delimiter
+// detection is local; go-yaml parses all metadata values and block scalars.
+func ParseFrontmatter(text string) (Frontmatter, string, error) {
+	rawFrontmatter, body, present := extractFrontmatter(text)
+	if !present {
+		return Frontmatter{}, text, nil
 	}
-	parts := strings.SplitN(text, "---", 3)
-	if len(parts) < 3 {
-		return meta, body
+	var metadata Frontmatter
+	if operationError := yaml.Unmarshal([]byte(rawFrontmatter), &metadata); operationError != nil {
+		return Frontmatter{}, body, operationError
 	}
-	raw := parts[1]
-	body = strings.TrimLeft(parts[2], "\n")
+	return metadata, body, nil
+}
 
-	key := ""
-	acc := []string{}
-	flush := func() {
-		if key == "" {
-			return
-		}
-		meta[key] = stripQuotes(strings.TrimSpace(strings.Join(acc, " ")))
-		key = ""
-		acc = nil
+func extractFrontmatter(text string) (string, string, bool) {
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 || strings.TrimSuffix(lines[0], "\r") != "---" {
+		return "", text, false
 	}
-	for _, line := range strings.Split(raw, "\n") {
-		if strings.TrimSpace(line) == "" {
+	for lineIndex := 1; lineIndex < len(lines); lineIndex++ {
+		if strings.TrimSuffix(lines[lineIndex], "\r") != "---" {
 			continue
 		}
-		if (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")) && key != "" {
-			acc = append(acc, strings.TrimSpace(line))
-			continue
-		}
-		flush()
-		if lineIndex := strings.Index(line, ":"); lineIndex >= 0 {
-			parsedKey := strings.TrimSpace(line[:lineIndex])
-			value := strings.TrimSpace(line[lineIndex+1:])
-			switch value {
-			case "|", ">", ">-", "|-", "":
-				key = parsedKey
-				acc = []string{}
-			default:
-				meta[parsedKey] = stripQuotes(value)
-			}
-		}
+		frontmatter := strings.Join(lines[1:lineIndex], "\n")
+		body := strings.Join(lines[lineIndex+1:], "\n")
+		return frontmatter, strings.TrimLeft(body, "\r\n"), true
 	}
-	flush()
-	return meta, body
-}
-
-func stripQuotes(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) >= 2 {
-		if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
-			return value[1 : len(value)-1]
-		}
-	}
-	return value
-}
-
-// Roots returns skill roots in the same precedence as server.py.
-func Roots(workingDirectory string) []string {
-	home, _ := os.UserHomeDir()
-	roots := []string{}
-	if home != "" {
-		grok := filepath.Join(home, ".grok")
-		for _, root := range []string{"skills", "bundled/skills", "plugins", "installed-plugins", "marketplace-cache"} {
-			path := filepath.Join(grok, filepath.FromSlash(root))
-			if isDirectory(path) {
-				roots = append(roots, path)
-			}
-		}
-	}
-	if strings.TrimSpace(workingDirectory) != "" {
-		for _, root := range []string{".grok/skills", ".agents/skills", "skills"} {
-			path := filepath.Join(workingDirectory, filepath.FromSlash(root))
-			if isDirectory(path) {
-				roots = append(roots, path)
-			}
-		}
-	}
-	return roots
-}
-
-func commandRoots(workingDirectory string) []string {
-	home, _ := os.UserHomeDir()
-	roots := []string{}
-	if home != "" {
-		grok := filepath.Join(home, ".grok")
-		for _, root := range []string{"plugins", "installed-plugins", "marketplace-cache"} {
-			path := filepath.Join(grok, root)
-			if isDirectory(path) {
-				roots = append(roots, path)
-			}
-		}
-	}
-	if strings.TrimSpace(workingDirectory) != "" {
-		for _, root := range []string{".grok/commands", "commands"} {
-			path := filepath.Join(workingDirectory, filepath.FromSlash(root))
-			if isDirectory(path) {
-				roots = append(roots, path)
-			}
-		}
-	}
-	return roots
-}
-
-func isDirectory(path string) bool {
-	fileInfo, operationError := os.Stat(path)
-	return operationError == nil && fileInfo.IsDir()
+	return "", text, false
 }
 
 func hasSkippedPart(path string) bool {
@@ -145,30 +75,7 @@ func hasSkippedPart(path string) bool {
 	return false
 }
 
-func hasPart(path, want string) bool {
-	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
-		if part == want {
-			return true
-		}
-	}
-	return false
-}
-
-func sourceFor(path string) string {
-	slashPath := "/" + filepath.ToSlash(path) + "/"
-	switch {
-	case strings.Contains(slashPath, "/bundled/"):
-		return "bundled"
-	case strings.Contains(slashPath, "/marketplace-cache/"):
-		return "marketplace"
-	case strings.Contains(slashPath, "/plugins/") || strings.Contains(slashPath, "/installed-plugins/"):
-		return "plugin"
-	default:
-		return "user"
-	}
-}
-
-func shortDesc(value string) string {
+func shortDescription(value string) string {
 	if len([]rune(value)) <= 240 {
 		return value
 	}
@@ -176,66 +83,133 @@ func shortDesc(value string) string {
 	return string(runes[:237]) + "..."
 }
 
-func invocable(meta Frontmatter) bool {
-	switch strings.ToLower(strings.TrimSpace(meta["user-invocable"])) {
-	case "false", "0", "no":
-		return false
-	default:
-		return true
-	}
+func invocable(metadata Frontmatter) bool {
+	return metadata.UserInvocable == nil || *metadata.UserInvocable
 }
 
-// Scan returns all discovered skills and slash commands, de-duplicated case-insensitively.
-func Scan(workingDirectory string) ([]Item, error) {
-	seen := map[string]bool{}
-	out := []Item{}
+type scanRoot struct {
+	canonicalPath string
+	kind          providerapi.SkillRootKind
+	source        providerapi.SkillRootSource
+}
 
-	for _, root := range Roots(workingDirectory) {
-		_ = filepath.WalkDir(root, func(path string, directoryEntry os.DirEntry, operationError error) error {
-			if operationError != nil {
-				return nil
-			}
-			if directoryEntry.IsDir() {
-				if directoryEntry.Name() == "node_modules" || directoryEntry.Name() == ".git" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if directoryEntry.Name() != "SKILL.md" || hasSkippedPart(path) {
-				return nil
-			}
-			raw, operationError := os.ReadFile(path)
-			if operationError != nil {
-				return nil
-			}
-			meta, _ := ParseFrontmatter(string(raw))
-			name := strings.TrimSpace(meta["name"])
-			if name == "" {
-				name = filepath.Base(filepath.Dir(path))
-			}
-			key := strings.ToLower(name)
-			if name == "" || seen[key] {
-				return nil
-			}
-			seen[key] = true
-			source := sourceFor(path)
-			out = append(out, Item{
-				Name:          name,
-				Description:   shortDesc(meta["description"]),
-				When:          meta["when-to-use"],
-				Hint:          meta["argument-hint"],
-				Source:        source,
-				Path:          path,
-				Kind:          "skill",
-				UserInvocable: invocable(meta),
-				Invoke:        "/" + name,
-			})
-			return nil
+// canonicalRoots deliberately resolves a configured root symlink once before
+// traversal. Nested symlinks and symlinked metadata files remain forbidden.
+func canonicalRoots(configuredRoots []providerapi.SkillRoot) []scanRoot {
+	roots := make([]scanRoot, 0, len(configuredRoots))
+	seen := make(map[string]struct{}, len(configuredRoots))
+	for _, configuredRoot := range configuredRoots {
+		if strings.TrimSpace(configuredRoot.Path) == "" || strings.TrimSpace(string(configuredRoot.Source)) == "" ||
+			(configuredRoot.Kind != providerapi.SkillRootKindSkill && configuredRoot.Kind != providerapi.SkillRootKindCommand) {
+			continue
+		}
+		absolutePath, operationError := filepath.Abs(configuredRoot.Path)
+		if operationError != nil {
+			continue
+		}
+		canonicalPath, operationError := filepath.EvalSymlinks(absolutePath)
+		if operationError != nil {
+			continue
+		}
+		fileInfo, operationError := os.Stat(canonicalPath)
+		if operationError != nil || !fileInfo.IsDir() {
+			continue
+		}
+		cacheKey := string(configuredRoot.Kind) + "\x00" + canonicalPath
+		if _, present := seen[cacheKey]; present {
+			continue
+		}
+		seen[cacheKey] = struct{}{}
+		roots = append(roots, scanRoot{
+			canonicalPath: canonicalPath,
+			kind:          configuredRoot.Kind,
+			source:        configuredRoot.Source,
 		})
 	}
+	return roots
+}
 
-	for _, root := range commandRoots(workingDirectory) {
-		_ = filepath.WalkDir(root, func(path string, directoryEntry os.DirEntry, operationError error) error {
+func readRegularFile(path string) ([]byte, error) {
+	pathInfo, operationError := os.Lstat(path)
+	if operationError != nil {
+		return nil, operationError
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.Mode().IsRegular() {
+		return nil, errors.New("metadata path is not a regular file")
+	}
+	file, operationError := os.Open(path)
+	if operationError != nil {
+		return nil, operationError
+	}
+	defer file.Close()
+	openedInfo, operationError := file.Stat()
+	if operationError != nil {
+		return nil, operationError
+	}
+	currentInfo, operationError := os.Lstat(path)
+	if operationError != nil {
+		return nil, operationError
+	}
+	if currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.Mode().IsRegular() || !os.SameFile(pathInfo, openedInfo) || !os.SameFile(openedInfo, currentInfo) {
+		return nil, errors.New("metadata path changed during open")
+	}
+	return io.ReadAll(file)
+}
+
+func metadataCandidate(root scanRoot, directoryEntry os.DirEntry) bool {
+	if root.kind == providerapi.SkillRootKindSkill {
+		return directoryEntry.Name() == "SKILL.md"
+	}
+	lowerName := strings.ToLower(directoryEntry.Name())
+	return filepath.Ext(lowerName) == ".md" && lowerName != "readme.md" &&
+		lowerName != "changelog.md" && lowerName != "license.md"
+}
+
+func readItem(root scanRoot, path string) (Item, bool) {
+	raw, operationError := readRegularFile(path)
+	if operationError != nil {
+		return Item{}, false
+	}
+	metadata, _, operationError := ParseFrontmatter(string(raw))
+	if operationError != nil {
+		return Item{}, false
+	}
+	name := strings.TrimSpace(metadata.Name)
+	if root.kind == providerapi.SkillRootKindCommand {
+		name = strings.TrimLeft(name, "/")
+		if name == "" {
+			name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		}
+	} else if name == "" {
+		name = filepath.Base(filepath.Dir(path))
+	}
+	if name == "" {
+		return Item{}, false
+	}
+	item := Item{
+		Name:          name,
+		Description:   shortDescription(metadata.Description),
+		Hint:          metadata.Hint,
+		Source:        string(root.source),
+		Path:          path,
+		Kind:          string(root.kind),
+		UserInvocable: true,
+		Invoke:        "/" + name,
+	}
+	if root.kind == providerapi.SkillRootKindSkill {
+		item.When = metadata.When
+		item.UserInvocable = invocable(metadata)
+	}
+	return item, true
+}
+
+// Scan returns discovered skills and slash commands from provider-supplied
+// roots, de-duplicated case-insensitively.
+func Scan(configuredRoots []providerapi.SkillRoot) ([]Item, error) {
+	seen := map[string]bool{}
+	items := []Item{}
+	for _, root := range canonicalRoots(configuredRoots) {
+		_ = filepath.WalkDir(root.canonicalPath, func(path string, directoryEntry os.DirEntry, operationError error) error {
 			if operationError != nil {
 				return nil
 			}
@@ -245,52 +219,37 @@ func Scan(workingDirectory string) ([]Item, error) {
 				}
 				return nil
 			}
-			lower := strings.ToLower(directoryEntry.Name())
-			if filepath.Ext(lower) != ".md" || lower == "readme.md" || lower == "changelog.md" || lower == "license.md" || !hasPart(path, "commands") || hasSkippedPart(path) {
+			if !metadataCandidate(root, directoryEntry) || hasSkippedPart(path) {
 				return nil
 			}
-			raw, operationError := os.ReadFile(path)
-			if operationError != nil {
+			item, valid := readItem(root, path)
+			if !valid {
 				return nil
 			}
-			meta, _ := ParseFrontmatter(string(raw))
-			name := strings.TrimLeft(strings.TrimSpace(meta["name"]), "/")
-			if name == "" {
-				name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-			}
-			key := strings.ToLower(name)
-			if name == "" || seen[key] {
+			key := strings.ToLower(item.Name)
+			if seen[key] {
 				return nil
 			}
 			seen[key] = true
-			out = append(out, Item{
-				Name:          name,
-				Description:   shortDesc(meta["description"]),
-				Hint:          meta["argument-hint"],
-				Source:        "command",
-				Path:          path,
-				Kind:          "command",
-				UserInvocable: true,
-				Invoke:        "/" + name,
-			})
+			items = append(items, item)
 			return nil
 		})
 	}
 
 	order := map[string]int{"bundled": 0, "user": 1, "plugin": 2, "command": 3, "marketplace": 4, "agent": 5}
-	sort.Slice(out, func(leftIndex, rightIndex int) bool {
-		leftOrder, valid := order[out[leftIndex].Source]
+	sort.Slice(items, func(leftIndex, rightIndex int) bool {
+		leftOrder, valid := order[items[leftIndex].Source]
 		if !valid {
 			leftOrder = 9
 		}
-		rightOrder, valid := order[out[rightIndex].Source]
+		rightOrder, valid := order[items[rightIndex].Source]
 		if !valid {
 			rightOrder = 9
 		}
 		if leftOrder != rightOrder {
 			return leftOrder < rightOrder
 		}
-		return strings.ToLower(out[leftIndex].Name) < strings.ToLower(out[rightIndex].Name)
+		return strings.ToLower(items[leftIndex].Name) < strings.ToLower(items[rightIndex].Name)
 	})
-	return out, nil
+	return items, nil
 }

@@ -3,7 +3,6 @@ package fsapi
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,6 +20,7 @@ const (
 var (
 	PathRequiredError     = errors.New("path required")
 	OutsideWorkspaceError = errors.New("path outside workspace")
+	WorkspaceChangedError = errors.New("workspace root changed")
 	NotDirectoryError     = errors.New("not a directory")
 	NotFileError          = errors.New("not a file")
 	FileTooLargeError     = errors.New("file too large")
@@ -49,6 +49,7 @@ type Service struct {
 	mutex          sync.RWMutex
 	root           string
 	rootFilesystem *os.Root
+	rootIdentity   *RootIdentity
 }
 
 type RootInfo struct {
@@ -109,6 +110,16 @@ func New(root string) (*Service, error) {
 	return service, nil
 }
 
+// NewPinned opens a filesystem service for an already-bound workspace. The
+// opened os.Root and the path are checked against the original identity.
+func NewPinned(identity *RootIdentity) (*Service, error) {
+	rootFilesystem, operationError := identity.OpenRoot()
+	if operationError != nil {
+		return nil, operationError
+	}
+	return &Service{root: identity.Path(), rootFilesystem: rootFilesystem, rootIdentity: identity}, nil
+}
+
 func (service *Service) Close() error {
 	service.mutex.Lock()
 	defer service.mutex.Unlock()
@@ -130,7 +141,7 @@ func (service *Service) Info() RootInfo {
 	service.mutex.RLock()
 	defer service.mutex.RUnlock()
 	exists := false
-	if service.rootFilesystem != nil {
+	if service.rootFilesystem != nil && service.validateRootLocked() == nil {
 		if info, operationError := service.rootFilesystem.Stat("."); operationError == nil {
 			exists = info.IsDir()
 		}
@@ -139,35 +150,39 @@ func (service *Service) Info() RootInfo {
 }
 
 func (service *Service) SetRoot(raw string) (RootInfo, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return RootInfo{}, PathRequiredError
-	}
-	absolutePath, operationError := filepath.Abs(filepath.Clean(raw))
+	identity, operationError := PinRoot(raw)
 	if operationError != nil {
-		return RootInfo{}, fmt.Errorf("resolve workspace: %w", operationError)
+		return RootInfo{}, operationError
 	}
-	info, operationError := os.Stat(absolutePath)
+	root, operationError := identity.OpenRoot()
 	if operationError != nil {
-		return RootInfo{}, fmt.Errorf("open workspace: %w", operationError)
-	}
-	if !info.IsDir() {
-		return RootInfo{}, NotDirectoryError
-	}
-	root, operationError := os.OpenRoot(absolutePath)
-	if operationError != nil {
-		return RootInfo{}, fmt.Errorf("open workspace: %w", operationError)
+		return RootInfo{}, operationError
 	}
 
 	service.mutex.Lock()
 	previous := service.rootFilesystem
-	service.root = absolutePath
+	service.root = identity.Path()
 	service.rootFilesystem = root
+	service.rootIdentity = identity
 	service.mutex.Unlock()
 	if previous != nil {
 		_ = previous.Close()
 	}
-	return RootInfo{Root: absolutePath, Exists: true}, nil
+	return RootInfo{Root: identity.Path(), Exists: true}, nil
+}
+
+func (service *Service) validateRootLocked() error {
+	if service.rootFilesystem == nil {
+		return os.ErrClosed
+	}
+	if operationError := service.rootIdentity.Validate(); operationError != nil {
+		return operationError
+	}
+	openedInfo, operationError := service.rootFilesystem.Stat(".")
+	if operationError != nil || !os.SameFile(service.rootIdentity.fileInfo, openedInfo) {
+		return WorkspaceChangedError
+	}
+	return nil
 }
 
 // Resolve converts a client path into an absolute workspace path. File operations
@@ -180,8 +195,8 @@ func (service *Service) Resolve(raw string) (string, error) {
 	if operationError != nil {
 		return "", operationError
 	}
-	if service.rootFilesystem == nil {
-		return "", os.ErrClosed
+	if operationError := service.validateRootLocked(); operationError != nil {
+		return "", operationError
 	}
 	if _, operationError := service.rootFilesystem.Stat(relativePath); operationError != nil && !errors.Is(operationError, os.ErrNotExist) {
 		return "", normalizeRootError(operationError)
@@ -189,11 +204,69 @@ func (service *Service) Resolve(raw string) (string, error) {
 	return absolutePath(service.root, relativePath), nil
 }
 
+// OpenRead opens a workspace-relative regular file through os.Root so symlink
+// traversal cannot escape the workspace between validation and access.
+func (service *Service) OpenRead(raw string) (*os.File, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, PathRequiredError
+	}
+	service.mutex.RLock()
+	defer service.mutex.RUnlock()
+	if operationError := service.validateRootLocked(); operationError != nil {
+		return nil, operationError
+	}
+	relativePath, operationError := relativePath(service.root, raw)
+	if operationError != nil {
+		return nil, operationError
+	}
+	file, operationError := service.rootFilesystem.Open(relativePath)
+	if operationError != nil {
+		return nil, normalizeRootError(operationError)
+	}
+	fileInfo, operationError := file.Stat()
+	if operationError != nil {
+		_ = file.Close()
+		return nil, operationError
+	}
+	if !fileInfo.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, NotFileError
+	}
+	return file, nil
+}
+
+// OpenDirectory opens a workspace-relative directory, pinning its descriptor.
+func (service *Service) OpenDirectory(raw string) (*os.File, error) {
+	service.mutex.RLock()
+	defer service.mutex.RUnlock()
+	if operationError := service.validateRootLocked(); operationError != nil {
+		return nil, operationError
+	}
+	relativePath, operationError := relativePath(service.root, raw)
+	if operationError != nil {
+		return nil, operationError
+	}
+	file, operationError := service.rootFilesystem.Open(relativePath)
+	if operationError != nil {
+		return nil, normalizeRootError(operationError)
+	}
+	fileInfo, operationError := file.Stat()
+	if operationError != nil {
+		_ = file.Close()
+		return nil, operationError
+	}
+	if !fileInfo.IsDir() {
+		_ = file.Close()
+		return nil, NotDirectoryError
+	}
+	return file, nil
+}
+
 func (service *Service) List(raw string) (Listing, error) {
 	service.mutex.RLock()
 	defer service.mutex.RUnlock()
-	if service.rootFilesystem == nil {
-		return Listing{}, os.ErrClosed
+	if operationError := service.validateRootLocked(); operationError != nil {
+		return Listing{}, operationError
 	}
 	relativePath, operationError := relativePath(service.root, raw)
 	if operationError != nil {
@@ -277,8 +350,8 @@ func (service *Service) Read(raw string) (ReadResult, error) {
 	}
 	service.mutex.RLock()
 	defer service.mutex.RUnlock()
-	if service.rootFilesystem == nil {
-		return ReadResult{}, os.ErrClosed
+	if operationError := service.validateRootLocked(); operationError != nil {
+		return ReadResult{}, operationError
 	}
 	relativePath, operationError := relativePath(service.root, raw)
 	if operationError != nil {
@@ -335,8 +408,8 @@ func (service *Service) Write(raw, content string) (WriteResult, error) {
 	}
 	service.mutex.RLock()
 	defer service.mutex.RUnlock()
-	if service.rootFilesystem == nil {
-		return WriteResult{}, os.ErrClosed
+	if operationError := service.validateRootLocked(); operationError != nil {
+		return WriteResult{}, operationError
 	}
 	relativePath, operationError := relativePath(service.root, raw)
 	if operationError != nil {
@@ -376,8 +449,8 @@ func (service *Service) Mkdir(raw string) (string, error) {
 	}
 	service.mutex.RLock()
 	defer service.mutex.RUnlock()
-	if service.rootFilesystem == nil {
-		return "", os.ErrClosed
+	if operationError := service.validateRootLocked(); operationError != nil {
+		return "", operationError
 	}
 	relativePath, operationError := relativePath(service.root, raw)
 	if operationError != nil {
@@ -401,53 +474,11 @@ func IsTextPath(name string) bool {
 	return filepath.Ext(lower) == ""
 }
 
-func relativePath(root, raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "." || raw == string(filepath.Separator) {
-		return ".", nil
-	}
-	var relativePath string
-	if filepath.IsAbs(raw) {
-		var operationError error
-		relativePath, operationError = filepath.Rel(root, filepath.Clean(raw))
-		if operationError != nil {
-			return "", OutsideWorkspaceError
-		}
-	} else {
-		relativePath = filepath.Clean(raw)
-	}
-	if relativePath == "." {
-		return relativePath, nil
-	}
-	if relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) || filepath.IsAbs(relativePath) {
-		return "", OutsideWorkspaceError
-	}
-	return relativePath, nil
-}
-
 func displayRelativePath(relativePath string) string {
 	if relativePath == "" || relativePath == "." {
 		return "."
 	}
 	return filepath.ToSlash(relativePath)
-}
-
-func absolutePath(root, relativePath string) string {
-	if relativePath == "." || relativePath == "" {
-		return root
-	}
-	return filepath.Join(root, relativePath)
-}
-
-func normalizeRootError(operationError error) error {
-	if operationError == nil {
-		return nil
-	}
-	lower := strings.ToLower(operationError.Error())
-	if strings.Contains(lower, "escapes") || strings.Contains(lower, "outside") {
-		return fmt.Errorf("%w: %v", OutsideWorkspaceError, operationError)
-	}
-	return operationError
 }
 
 func decodeText(data []byte) string {

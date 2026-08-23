@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/compat"
 )
 
 const testSecret = "0123456789abcdef"
@@ -17,9 +19,7 @@ func TestAuthMiddlewareBypasses(testingContext *testing.T) {
 		target string
 	}{
 		{name: "empty secret", target: "/private"},
-		{name: "demo", secret: testSecret, target: "/private?demo=1"},
 		{name: "health", secret: testSecret, target: "/health"},
-		{name: "deep health", secret: testSecret, target: "/health/deep"},
 	}
 	for _, testCase := range cases {
 		testingContext.Run(testCase.name, func(testingContext *testing.T) {
@@ -36,6 +36,28 @@ func TestAuthMiddlewareBypasses(testingContext *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareDeepHealthRequiresPairingKey(testingContext *testing.T) {
+	for _, remote := range []string{"192.0.2.10:1234", "127.0.0.1:1234", "[::1]:1234"} {
+		testingContext.Run(remote, func(testingContext *testing.T) {
+			response := serveAuth(testSecret, "/health/deep", remote, nil, okHandler())
+			if response.Code != http.StatusUnauthorized {
+				testingContext.Fatalf("status = %d", response.Code)
+			}
+		})
+	}
+}
+
+func TestAuthMiddlewareDemoQueryDoesNotBypassAuthentication(testingContext *testing.T) {
+	for _, target := range []string{"/private?demo=1", "/ws?demo=1", "/api/stack/stop?demo=1"} {
+		testingContext.Run(target, func(testingContext *testing.T) {
+			response := serveAuth(testSecret, target, "192.0.2.10:1234", nil, okHandler())
+			if response.Code != http.StatusUnauthorized {
+				testingContext.Fatalf("status = %d", response.Code)
+			}
+		})
+	}
+}
+
 func TestAuthMiddlewareCredentialSourcesAndPrecedence(testingContext *testing.T) {
 	cases := []struct {
 		name    string
@@ -43,8 +65,10 @@ func TestAuthMiddlewareCredentialSourcesAndPrecedence(testingContext *testing.T)
 		headers http.Header
 	}{
 		{name: "query", target: "/private?key=" + testSecret},
-		{name: "cookie", target: "/private", headers: http.Header{"Cookie": {authCookieName + "=" + testSecret}}},
-		{name: "header", target: "/private", headers: http.Header{"X-Grok-Remote-Key": {testSecret}}},
+		{name: "cookie", target: "/private", headers: http.Header{"Cookie": {compat.AuthenticationCookieName + "=" + testSecret}}},
+		{name: "header", target: "/private", headers: http.Header{compat.AuthenticationHeaderName: {testSecret}}},
+		{name: "legacy cookie compatibility", target: "/private", headers: http.Header{"Cookie": {"grok_remote_key=" + testSecret}}},
+		{name: "legacy header compatibility", target: "/private", headers: http.Header{"X-Grok-Remote-Key": {testSecret}}},
 	}
 	for _, testCase := range cases {
 		testingContext.Run(testCase.name, func(testingContext *testing.T) {
@@ -57,8 +81,8 @@ func TestAuthMiddlewareCredentialSourcesAndPrecedence(testingContext *testing.T)
 	}
 
 	headers := http.Header{
-		"Cookie":            {authCookieName + "=" + testSecret},
-		"X-Grok-Remote-Key": {testSecret},
+		"Cookie":                        {compat.AuthenticationCookieName + "=" + testSecret},
+		compat.AuthenticationHeaderName: {testSecret},
 	}
 	response := serveAuth(testSecret, "/private?key=wrong", "192.0.2.10:1234", headers, okHandler())
 	if response.Code != http.StatusUnauthorized {
@@ -66,8 +90,8 @@ func TestAuthMiddlewareCredentialSourcesAndPrecedence(testingContext *testing.T)
 	}
 
 	headers = http.Header{
-		"Cookie":            {authCookieName + "=wrong"},
-		"X-Grok-Remote-Key": {testSecret},
+		"Cookie":                        {compat.AuthenticationCookieName + "=wrong"},
+		compat.AuthenticationHeaderName: {testSecret},
 	}
 	response = serveAuth(testSecret, "/private", "192.0.2.10:1234", headers, okHandler())
 	if response.Code != http.StatusUnauthorized {
@@ -75,59 +99,73 @@ func TestAuthMiddlewareCredentialSourcesAndPrecedence(testingContext *testing.T)
 	}
 }
 
-func TestAuthMiddlewareLoopbackBypassUsesTCPPeerOnly(testingContext *testing.T) {
+func TestAuthMiddlewareLoopbackStillRequiresPairingKey(testingContext *testing.T) {
 	for _, remote := range []string{"127.0.0.1:1234", "127.23.4.5:1234", "[::1]:1234", "[::ffff:127.0.0.1]:1234"} {
 		testingContext.Run(remote, func(testingContext *testing.T) {
 			response := serveAuth(testSecret, "/private?key=wrong", remote, nil, okHandler())
-			if response.Code != http.StatusOK {
+			if response.Code != http.StatusUnauthorized {
 				testingContext.Fatalf("status = %d", response.Code)
 			}
-			assertAuthCookie(testingContext, response)
+			if response.Header().Get("Set-Cookie") != "" {
+				testingContext.Fatal("unauthorized loopback response set cookie")
+			}
 		})
 	}
 
-	headers := http.Header{"X-Forwarded-For": {"127.0.0.1"}}
-	response := serveAuth(testSecret, "/private", "192.0.2.10:1234", headers, okHandler())
-	if response.Code != http.StatusUnauthorized {
-		testingContext.Fatalf("trusted forwarded peer: %d", response.Code)
+	headers := http.Header{compat.AuthenticationHeaderName: {testSecret}}
+	response := serveAuth(testSecret, "/private", "127.0.0.1:1234", headers, okHandler())
+	if response.Code != http.StatusOK {
+		testingContext.Fatalf("authenticated loopback status: %d", response.Code)
 	}
+	assertAuthCookie(testingContext, response)
 }
 
 func TestAuthMiddlewareUnauthorizedWebSocket(testingContext *testing.T) {
-	headers := http.Header{"Accept": {"text/html"}}
-	response := serveAuth(testSecret, "/ws", "192.0.2.10:1234", headers, okHandler())
-	if response.Code != http.StatusUnauthorized {
-		testingContext.Fatalf("status = %d", response.Code)
-	}
-	if strings.TrimSpace(response.Body.String()) != "unauthorized" {
-		testingContext.Fatalf("body = %q", response.Body.String())
-	}
-	if response.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
-		testingContext.Fatalf("content type = %q", response.Header().Get("Content-Type"))
-	}
-	if response.Header().Get("Set-Cookie") != "" {
-		testingContext.Fatal("websocket response set cookie")
+	headers := http.Header{"Accept": {"text/html"}, "Origin": {"https://attacker.example"}}
+	for _, remote := range []string{"192.0.2.10:1234", "127.0.0.1:1234", "[::1]:1234"} {
+		testingContext.Run(remote, func(testingContext *testing.T) {
+			response := serveAuth(testSecret, "/ws", remote, headers, okHandler())
+			if response.Code != http.StatusUnauthorized {
+				testingContext.Fatalf("status = %d", response.Code)
+			}
+			if strings.TrimSpace(response.Body.String()) != "unauthorized" {
+				testingContext.Fatalf("body = %q", response.Body.String())
+			}
+			if response.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+				testingContext.Fatalf("content type = %q", response.Header().Get("Content-Type"))
+			}
+			if response.Header().Get("Set-Cookie") != "" {
+				testingContext.Fatal("websocket response set cookie")
+			}
+		})
 	}
 }
 
 func TestAuthMiddlewareUnauthorizedHTMLPairingPage(testingContext *testing.T) {
 	headers := http.Header{"Accept": {"application/xhtml+xml, TEXT/HTML;q=0.9"}}
-	response := serveAuth(testSecret, "http://example.test:35126/private", "192.0.2.10:1234", headers, okHandler())
-	if response.Code != http.StatusUnauthorized {
-		testingContext.Fatalf("status = %d", response.Code)
-	}
-	if got := response.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
-		testingContext.Fatalf("content type = %q", got)
-	}
-	body := response.Body.String()
-	for _, want := range []string{
-		"Pairing key required",
-		"http://192.168.1.4:35126/?key=" + testSecret + "&auto=1",
-		"http://127.0.0.1:35126/?key=" + testSecret + "&auto=1",
+	for _, target := range []string{
+		"http://remote.example:24443/private",
+		"http://remote.example:24443/pair",
+		"http://remote.example:24443/?auto=1",
 	} {
-		if !strings.Contains(body, want) {
-			testingContext.Fatalf("pairing page missing %q: %s", want, body)
-		}
+		testingContext.Run(target, func(testingContext *testing.T) {
+			response := serveAuth(testSecret, target, "192.0.2.10:1234", headers, okHandler())
+			if response.Code != http.StatusUnauthorized {
+				testingContext.Fatalf("status = %d", response.Code)
+			}
+			if contentType := response.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
+				testingContext.Fatalf("content type = %q", contentType)
+			}
+			body := response.Body.String()
+			for _, expectedText := range []string{"Pairing key required", "trusted launcher"} {
+				if !strings.Contains(body, expectedText) {
+					testingContext.Fatalf("pairing page missing %q: %s", expectedText, body)
+				}
+			}
+			if strings.Contains(body, testSecret) || strings.Contains(body, "?key=") {
+				testingContext.Fatalf("unauthorized page disclosed pairing material: %s", body)
+			}
+		})
 	}
 }
 
@@ -143,7 +181,7 @@ func TestAuthMiddlewareUnauthorizedJSON(testingContext *testing.T) {
 	if errorValue := json.Unmarshal(response.Body.Bytes(), &body); errorValue != nil {
 		testingContext.Fatal(errorValue)
 	}
-	const want = "unauthorized · open the paired link from connect.url, or add ?key=<secret>"
+	const want = "unauthorized · scan the trusted launcher QR code or provide the pairing key"
 	if body["error"] != want {
 		testingContext.Fatalf("error = %q", body["error"])
 	}
@@ -162,24 +200,7 @@ func TestAuthMiddlewareCookieAndWebSocketRules(testingContext *testing.T) {
 	}
 }
 
-func TestAuthMiddlewarePairingPagePortFallback(testingContext *testing.T) {
-	headers := http.Header{"Accept": {"text/html"}}
-	response := serveAuthWithOptions(testSecret, "http://example.test/private", "192.0.2.10:1234", headers, okHandler(), "192.168.1.4", 0)
-	if !strings.Contains(response.Body.String(), "http://192.168.1.4:2421/") {
-		testingContext.Fatalf("default port missing: %s", response.Body.String())
-	}
-
-	response = serveAuthWithOptions(testSecret, "http://example.test/private", "192.0.2.10:1234", headers, okHandler(), "192.168.1.4", 20997)
-	if !strings.Contains(response.Body.String(), "http://192.168.1.4:20997/") {
-		testingContext.Fatalf("configured port missing: %s", response.Body.String())
-	}
-}
-
 func serveAuth(secret, target, remote string, headers http.Header, next http.Handler) *httptest.ResponseRecorder {
-	return serveAuthWithOptions(secret, target, remote, headers, next, "192.168.1.4", 2421)
-}
-
-func serveAuthWithOptions(secret, target, remote string, headers http.Header, next http.Handler, lanIP string, port int) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodGet, target, nil)
 	request.RemoteAddr = remote
 	for name, values := range headers {
@@ -188,7 +209,7 @@ func serveAuthWithOptions(secret, target, remote string, headers http.Header, ne
 		}
 	}
 	response := httptest.NewRecorder()
-	authMiddleware(secret, lanIP, port, next).ServeHTTP(response, request)
+	authMiddleware(secret, next).ServeHTTP(response, request)
 	return response
 }
 
@@ -205,7 +226,7 @@ func assertAuthCookie(testingContext *testing.T, response *httptest.ResponseReco
 		testingContext.Fatalf("cookies = %#v", cookies)
 	}
 	cookie := cookies[0]
-	if cookie.Name != authCookieName || cookie.Value != testSecret || cookie.Path != "/" || cookie.MaxAge != 30*24*60*60 {
+	if cookie.Name != compat.AuthenticationCookieName || cookie.Value != testSecret || cookie.Path != "/" || cookie.MaxAge != 30*24*60*60 {
 		testingContext.Fatalf("cookie = %#v", cookie)
 	}
 	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {

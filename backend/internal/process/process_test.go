@@ -2,9 +2,11 @@ package process
 
 import (
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,11 +20,10 @@ type fakeOS struct {
 	killed        []int
 	started       []StartSpecification
 	nextProcessID int
-	findGrok      string
 }
 
 func newFakeOS() *fakeOS {
-	return &fakeOS{listeners: map[int][]int{}, commands: map[int]string{}, alive: map[int]bool{}, starts: map[int]string{}, nextProcessID: 500, findGrok: "/usr/local/bin/grok"}
+	return &fakeOS{listeners: map[int][]int{}, commands: map[int]string{}, alive: map[int]bool{}, starts: map[int]string{}, nextProcessID: 500}
 }
 
 func (fakeSystem *fakeOS) operations() Operations {
@@ -42,12 +43,6 @@ func (fakeSystem *fakeOS) operations() Operations {
 				return processStartStamp, nil
 			}
 			return "", os.ErrNotExist
-		},
-		FindGrok: func() (string, error) {
-			if fakeSystem.findGrok == "" {
-				return "", GrokNotFoundError
-			}
-			return fakeSystem.findGrok, nil
 		},
 		StartProcess: func(specification StartSpecification) (int, error) {
 			fakeSystem.nextProcessID++
@@ -93,26 +88,14 @@ func (fakeSystem *fakeOS) operations() Operations {
 func testManager(testContext *testing.T, fakeSystem *fakeOS) *Manager {
 	testContext.Helper()
 	directoryPath := testContext.TempDir()
-	return &Manager{Config: Config{Port: 2419, BindHost: "127.0.0.1", Secret: "sekret", WorkingDirectory: directoryPath, LogDirectory: filepath.Join(directoryPath, "logs"), StatePath: filepath.Join(directoryPath, "state.json"), AlwaysApprove: true}, Operations: fakeSystem.operations()}
-}
-
-func TestAgentArguments(testContext *testing.T) {
-	arguments := AgentArguments(Config{Port: 2419, BindHost: "127.0.0.1", Secret: "s", AlwaysApprove: true})
-	expected := []string{"agent", "--always-approve", "--no-leader", "serve", "--bind", "127.0.0.1:2419", "--secret", "s"}
-	if !reflect.DeepEqual(arguments, expected) {
-		testContext.Fatalf("args=%#v", arguments)
-	}
-	leader := AgentArguments(Config{Port: 2420, BindHost: "127.0.0.1", UseLeader: true})
-	if strings.Join(leader, " ") != "agent --leader serve --bind 127.0.0.1:2420" {
-		testContext.Fatalf("leader args=%#v", leader)
-	}
+	return &Manager{Config: Config{Port: 2419, BindHost: "127.0.0.1", Secret: "sekret", RuntimeDirectory: directoryPath, ExecutablePath: "/usr/local/bin/provider-agent", Arguments: []string{"agent", "serve", "--bind", "127.0.0.1:2419", "--secret", "sekret"}, IdentityTokens: []string{"agent", "serve", "127.0.0.1:2419"}, LogDirectory: filepath.Join(directoryPath, "logs"), StatePath: filepath.Join(directoryPath, "state.json")}, Operations: fakeSystem.operations()}
 }
 
 func TestStartRefusesForeignListener(testContext *testing.T) {
 	fakeSystem := newFakeOS()
 	fakeSystem.listeners[2419] = []int{111}
 	fakeSystem.alive[111] = true
-	fakeSystem.commands[111] = "/usr/local/bin/grok agent serve --bind 127.0.0.1:2419"
+	fakeSystem.commands[111] = "/usr/local/bin/provider-agent agent serve --bind 127.0.0.1:2419"
 	manager := testManager(testContext, fakeSystem)
 
 	result, errorValue := manager.Start(false)
@@ -132,7 +115,7 @@ func TestStartCreatesStateAndRedactsSecret(testContext *testing.T) {
 		testContext.Fatalf("started=%d", len(fakeSystem.started))
 	}
 	specification := fakeSystem.started[0]
-	if specification.Path != "/usr/local/bin/grok" || !strings.Contains(strings.Join(specification.Arguments, " "), "agent --always-approve --no-leader serve --bind 127.0.0.1:2419 --secret sekret") {
+	if specification.Path != "/usr/local/bin/provider-agent" || strings.Join(specification.Arguments, " ") != "agent serve --bind 127.0.0.1:2419 --secret sekret" {
 		testContext.Fatalf("bad spec=%+v", specification)
 	}
 	state, errorValue := manager.LoadState()
@@ -228,15 +211,14 @@ func TestStartReturnsCleanupFailureWhenStateSaveFails(testContext *testing.T) {
 func TestCommandIdentitySupportsSpacesAndInterpreterWrappers(testContext *testing.T) {
 	identity := ProcessIdentity{
 		ProcessID:      901,
-		ExecutablePath: "/Users/Example User/.grok/bin/grok",
-		BindHost:       "127.0.0.1",
-		Port:           2419,
+		ExecutablePath: "/Users/Example User/bin/provider-agent",
+		IdentityTokens: []string{"agent", "serve", "127.0.0.1:2419"},
 	}
-	commandLine := `/usr/bin/env node "/Users/Example User/.grok/bin/grok" agent --always-approve --no-leader serve --bind 127.0.0.1:2419 --secret hidden`
+	commandLine := `/usr/bin/env node "/Users/Example User/bin/provider-agent" agent --always-approve --no-leader serve --bind 127.0.0.1:2419 --secret hidden`
 	if !commandLooksLikeAgent(commandLine, identity) {
 		testContext.Fatalf("valid wrapped command was rejected: %q", commandLine)
 	}
-	lookalikeCommand := `/usr/bin/env node "/Users/Example User/.grok/bin/grok-malicious" agent serve --bind 127.0.0.1:2419`
+	lookalikeCommand := `/usr/bin/env node "/Users/Example User/bin/provider-agent-malicious" agent serve --bind 127.0.0.1:2419`
 	if commandLooksLikeAgent(lookalikeCommand, identity) {
 		testContext.Fatalf("lookalike executable was accepted: %q", lookalikeCommand)
 	}
@@ -245,12 +227,12 @@ func TestCommandIdentitySupportsSpacesAndInterpreterWrappers(testContext *testin
 func TestStatusOwnsWrappedAgentFromPathWithSpaces(testContext *testing.T) {
 	fakeSystem := newFakeOS()
 	manager := testManager(testContext, fakeSystem)
-	manager.Config.GrokPath = "/Users/Example User/.grok/bin/grok"
+	manager.Config.ExecutablePath = "/Users/Example User/bin/provider-agent"
 	started, errorValue := manager.Start(false)
 	if errorValue != nil {
 		testContext.Fatal(errorValue)
 	}
-	fakeSystem.commands[started.ProcessID] = `/usr/bin/env node "/Users/Example User/.grok/bin/grok" agent --always-approve --no-leader serve --bind 127.0.0.1:2419 --secret sekret`
+	fakeSystem.commands[started.ProcessID] = `/usr/bin/env node "/Users/Example User/bin/provider-agent" agent --always-approve --no-leader serve --bind 127.0.0.1:2419 --secret sekret`
 
 	status := manager.Status()
 	if !status.Owned || !reflect.DeepEqual(status.OwnedProcessIDs, []int{started.ProcessID}) || len(status.ForeignProcessIDs) != 0 {
@@ -263,13 +245,12 @@ func TestVerifyProcessIdentityRejectsReusedProcessID(testContext *testing.T) {
 	const reusedProcessID = 777
 	fakeSystem.alive[reusedProcessID] = true
 	fakeSystem.starts[reusedProcessID] = "replacement start"
-	fakeSystem.commands[reusedProcessID] = "/usr/local/bin/grok agent serve --bind 127.0.0.1:2419"
+	fakeSystem.commands[reusedProcessID] = "/usr/local/bin/provider-agent agent serve --bind 127.0.0.1:2419"
 	identity := ProcessIdentity{
 		ProcessID:      reusedProcessID,
 		ProcessStart:   "original start",
-		ExecutablePath: "/usr/local/bin/grok",
-		BindHost:       "127.0.0.1",
-		Port:           2419,
+		ExecutablePath: "/usr/local/bin/provider-agent",
+		IdentityTokens: []string{"agent", "serve", "127.0.0.1:2419"},
 	}
 
 	identityMatches, errorValue := verifyProcessIdentity(identity, fakeSystem.operations())
@@ -301,7 +282,7 @@ func TestStopLeavesForeignUntouched(testContext *testing.T) {
 	fakeSystem := newFakeOS()
 	fakeSystem.listeners[2419] = []int{222}
 	fakeSystem.alive[222] = true
-	fakeSystem.commands[222] = "/usr/local/bin/grok agent serve --bind 127.0.0.1:2419"
+	fakeSystem.commands[222] = "/usr/local/bin/provider-agent agent serve --bind 127.0.0.1:2419"
 	manager := testManager(testContext, fakeSystem)
 	result, errorValue := manager.Stop()
 	if !errors.Is(errorValue, ForeignListenerError) || result.OK || len(fakeSystem.killed) != 0 {
@@ -322,5 +303,104 @@ func TestStopOwnedRemovesState(testContext *testing.T) {
 	}
 	if state, errorValue := manager.LoadState(); errorValue != nil || state != nil {
 		testContext.Fatalf("state after stop=%+v err=%v", state, errorValue)
+	}
+}
+
+func TestMergeEnvironmentReplacesInheritedProviderSecret(testContext *testing.T) {
+	merged := mergeEnvironment(
+		[]string{"PATH=/usr/bin", "GROK_AGENT_SECRET=inherited"},
+		[]string{"GROK_AGENT_SECRET=transport", "EXTRA=value"},
+	)
+	if !reflect.DeepEqual(merged, []string{"PATH=/usr/bin", "GROK_AGENT_SECRET=transport", "EXTRA=value"}) {
+		testContext.Fatalf("merged environment = %#v", merged)
+	}
+}
+
+func TestSystemProcessInspectionReadsCurrentProcess(testContext *testing.T) {
+	switch runtime.GOOS {
+	case "darwin", "linux", "windows":
+	default:
+		testContext.Skip("gopsutil CreateTime is not supported by this operating system")
+	}
+	processID := os.Getpid()
+	if !ProcessAlive(processID) {
+		testContext.Fatalf("current process %d was not running", processID)
+	}
+	commandLine, operationError := CommandLine(processID)
+	if operationError != nil || strings.TrimSpace(commandLine) == "" {
+		testContext.Fatalf("current process command=%q error=%v", commandLine, operationError)
+	}
+	firstStart, operationError := ProcessStart(processID)
+	if operationError != nil || strings.TrimSpace(firstStart) == "" {
+		testContext.Fatalf("current process start=%q error=%v", firstStart, operationError)
+	}
+	secondStart, operationError := ProcessStart(processID)
+	if operationError != nil || secondStart != firstStart {
+		testContext.Fatalf("unstable process start: first=%q second=%q error=%v", firstStart, secondStart, operationError)
+	}
+	if runtime.GOOS != "windows" {
+		if _, operationError := time.ParseInLocation("Mon Jan _2 15:04:05 2006", firstStart, time.Local); operationError != nil {
+			testContext.Fatalf("process start no longer matches persisted ps format: %q: %v", firstStart, operationError)
+		}
+	}
+}
+
+func TestSystemListenerInspectionFindsLocalTCPListener(testContext *testing.T) {
+	listener, operationError := net.Listen("tcp", "127.0.0.1:0")
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	processIDs, operationError := ListenProcessIDsPort(port, false)
+	if operationError != nil {
+		testContext.Fatalf("inspect local listener: %v", operationError)
+	}
+	if !containsProcessID(processIDs, os.Getpid()) {
+		testContext.Fatalf("current process %d missing from listener owners %v", os.Getpid(), processIDs)
+	}
+	withoutSelf, operationError := ListenProcessIDsPort(port, true)
+	if operationError != nil {
+		testContext.Fatalf("inspect listener excluding self: %v", operationError)
+	}
+	if containsProcessID(withoutSelf, os.Getpid()) {
+		testContext.Fatalf("current process was not excluded: %v", withoutSelf)
+	}
+}
+
+func TestStartProcessRedactsChildOutputAndProtectsLog(testContext *testing.T) {
+	if runtime.GOOS == "windows" {
+		testContext.Skip("shell fixture is Unix-specific")
+	}
+	transportSecret := "child-output-transport-secret"
+	logPath := filepath.Join(testContext.TempDir(), "provider.log")
+	processID, operationError := StartProcess(StartSpecification{
+		Path: "/bin/sh", Arguments: []string{"-c", `printf 'secret=%s\n' "$TEST_TRANSPORT_SECRET"`},
+		Environment:     append(os.Environ(), "TEST_TRANSPORT_SECRET="+transportSecret),
+		SensitiveValues: []string{transportSecret}, WorkingDirectory: testContext.TempDir(), LogPath: logPath,
+	})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if !waitUntil(3*time.Second, 25*time.Millisecond, func() bool { return !ProcessAlive(processID) }) {
+		testContext.Fatalf("child process %d did not exit", processID)
+	}
+	var logData []byte
+	if !waitUntil(2*time.Second, 25*time.Millisecond, func() bool {
+		logData, operationError = os.ReadFile(logPath)
+		return operationError == nil && len(logData) > 0
+	}) {
+		testContext.Fatalf("read child log: %v", operationError)
+	}
+	logText := string(logData)
+	if strings.Contains(logText, transportSecret) || logText != "secret=[REDACTED]\n" {
+		testContext.Fatalf("child log was not redacted: %q", logText)
+	}
+	fileInfo, operationError := os.Stat(logPath)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if fileInfo.Mode().Perm() != 0o600 {
+		testContext.Fatalf("child log permissions = %o", fileInfo.Mode().Perm())
 	}
 }

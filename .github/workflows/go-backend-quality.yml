@@ -4,12 +4,14 @@ on:
   push:
     paths:
       - "backend/**"
+      - "AGENTS.md"
       - "scripts/check-go-quality.sh"
       - "scripts/naming-gate.go"
       - ".github/workflows/go-backend-quality.yml"
   pull_request:
     paths:
       - "backend/**"
+      - "AGENTS.md"
       - "scripts/check-go-quality.sh"
       - "scripts/naming-gate.go"
       - ".github/workflows/go-backend-quality.yml"

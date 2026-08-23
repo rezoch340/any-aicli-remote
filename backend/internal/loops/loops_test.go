@@ -101,14 +101,14 @@ func TestManagerFiresImmediatelyAndUpdatesJob(testContext *testing.T) {
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	job, operationError := manager.Create("session-1", "check status", 60, "1m", "/tmp/work")
-	if operationError != nil {
-		testContext.Fatal(operationError)
-	}
 	if operationError := manager.Start(context.Background()); operationError != nil {
 		testContext.Fatal(operationError)
 	}
 	testContext.Cleanup(manager.Close)
+	job, operationError := manager.Create("session-1", "check status", 60, "1m", "/tmp/work")
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
 	select {
 	case note := <-fired:
 		want := "[REMOTE LOOP · 1m · fire 1]\ncheck status"
@@ -134,13 +134,13 @@ func TestManagerRecordsCallbackError(testContext *testing.T) {
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	if _, operationError := manager.Create("session", "prompt", 60, "", ""); operationError != nil {
-		testContext.Fatal(operationError)
-	}
 	if operationError := manager.Start(context.Background()); operationError != nil {
 		testContext.Fatal(operationError)
 	}
 	testContext.Cleanup(manager.Close)
+	if _, operationError := manager.Create("session", "prompt", 60, "", ""); operationError != nil {
+		testContext.Fatal(operationError)
+	}
 	select {
 	case <-called:
 	case <-time.After(2 * time.Second):
@@ -150,6 +150,40 @@ func TestManagerRecordsCallbackError(testContext *testing.T) {
 		jobs := manager.List("")
 		return len(jobs) == 1 && jobs[0].Fires == 0 && len([]rune(jobs[0].LastError)) == 200
 	})
+}
+
+func TestManagerDoesNotFirePersistedJobImmediatelyOnStart(testContext *testing.T) {
+	store := filepath.Join(testContext.TempDir(), "loops.json")
+	persistedManager, operationError := New(store, nil)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if _, operationError := persistedManager.Create("session", "prompt", MinInterval, "", ""); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+
+	fired := make(chan struct{}, 1)
+	reloadedManager, operationError := New(store, func(context.Context, Job, string) error {
+		fired <- struct{}{}
+		return nil
+	})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if operationError := reloadedManager.Start(context.Background()); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	testContext.Cleanup(reloadedManager.Close)
+
+	select {
+	case <-fired:
+		testContext.Fatal("persisted loop fired during daemon startup")
+	case <-time.After(250 * time.Millisecond):
+	}
+	jobs := reloadedManager.List("")
+	if len(jobs) != 1 || jobs[0].Fires != 0 || jobs[0].LastFire != 0 {
+		testContext.Fatalf("persisted loop changed before its interval: %#v", jobs)
+	}
 }
 
 func TestManagerPrunesExpiredJobsAtStart(testContext *testing.T) {

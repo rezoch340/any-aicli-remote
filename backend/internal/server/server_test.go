@@ -12,19 +12,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/grok-remote/grok-remote-app/backend/internal/config"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/compat"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/config"
 )
 
 const (
 	routeTestSecret = "server-route-test-secret"
+	routeSessionID  = "route-session"
 	remotePeer      = "192.0.2.10:4567"
 	loopbackPeer    = "127.0.0.1:4567"
 )
 
 type routeTestServer struct {
-	server  *Server
-	handler http.Handler
-	root    string
+	server   *Server
+	handler  http.Handler
+	root     string
+	sessions string
 }
 
 func newRouteTestServer(testingContext *testing.T) *routeTestServer {
@@ -43,31 +46,59 @@ func newRouteTestServerWithAgentPort(testingContext *testing.T, agentPort int) *
 			testingContext.Fatal(errorValue)
 		}
 	}
+	canonicalRoot, errorValue := filepath.EvalSymlinks(root)
+	if errorValue != nil {
+		testingContext.Fatal(errorValue)
+	}
+	root = canonicalRoot
 	testingContext.Setenv("HOME", home)
 	testingContext.Setenv("XAI_API_KEY", "")
 	testingContext.Setenv("GROK_API_KEY", "")
 	testingContext.Setenv("xai_api_key", "")
+	providerExecutable := filepath.Join(base, "provider-cli")
+	if errorValue := os.WriteFile(providerExecutable, []byte("#!/bin/sh\nexit 0\n"), 0o755); errorValue != nil {
+		testingContext.Fatal(errorValue)
+	}
+	writeSessionSummary := func(sessionID string) {
+		directory := filepath.Join(sessions, "project", sessionID)
+		if errorValue := os.MkdirAll(directory, 0o755); errorValue != nil {
+			testingContext.Fatal(errorValue)
+		}
+		data, errorValue := json.Marshal(map[string]any{
+			"info":            map[string]any{"id": sessionID, "cwd": root},
+			"generated_title": sessionID, "created_at": "2026-01-01T00:00:00Z",
+		})
+		if errorValue != nil {
+			testingContext.Fatal(errorValue)
+		}
+		if errorValue := os.WriteFile(filepath.Join(directory, "summary.json"), data, 0o644); errorValue != nil {
+			testingContext.Fatal(errorValue)
+		}
+	}
+	writeSessionSummary(routeSessionID)
+	writeSessionSummary("session-1")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server, errorValue := New(config.Config{
-		Bind:              "127.0.0.1",
-		Port:              35421,
-		AgentHost:         "127.0.0.1",
-		AgentPort:         agentPort,
-		Secret:            routeTestSecret,
-		WorkingDirectory:  root,
-		DataDirectory:     data,
-		SessionsDirectory: sessions,
-		EnsureAgent:       false,
+		Bind:            "127.0.0.1",
+		Port:            35421,
+		AgentHost:       "127.0.0.1",
+		AgentPort:       agentPort,
+		PairingSecret:   routeTestSecret,
+		AgentSecret:     "server-agent-transport-secret",
+		ProviderPath:    providerExecutable,
+		DataDirectory:   data,
+		ProviderOptions: map[string]string{"sessions-directory": sessions},
+		EnsureAgent:     false,
 	}, logger)
 	if errorValue != nil {
 		testingContext.Fatal(errorValue)
 	}
 	// Route tests must not inspect or start any real process.
 	server.process.Operations.ListenProcessIDs = func(int, bool) ([]int, error) { return nil, nil }
-	server.lanIP = "192.168.1.4"
+	server.lanIP = "192.0.2.44"
 	testingContext.Cleanup(server.Close)
-	return &routeTestServer{server: server, handler: server.Handler(), root: root}
+	return &routeTestServer{server: server, handler: server.Handler(), root: root, sessions: sessions}
 }
 
 func TestServerHealthIsPublic(testingContext *testing.T) {
@@ -78,7 +109,7 @@ func TestServerHealthIsPublic(testingContext *testing.T) {
 	if body["ok"] != true || body["ui"] != true {
 		testingContext.Fatalf("health = %#v", body)
 	}
-	if body["cwd"] != fixture.root || body["agent_listening"] != false {
+	if body["cwd"] != nil || body["agent_listening"] != false {
 		testingContext.Fatalf("health compatibility fields = %#v", body)
 	}
 	if response.Header().Get("Set-Cookie") != "" {
@@ -118,17 +149,40 @@ func TestServerRemoteAuthAndConfig(testingContext *testing.T) {
 	response := fixture.request(testingContext, http.MethodGet, "/config", nil, remotePeer, true)
 	assertStatus(testingContext, response, http.StatusOK)
 	body := decodeObject(testingContext, response)
-	if body["secret"] != "(held server-side)" || body["cwd"] != fixture.root {
+	if body["secret"] != "(held server-side)" || body["cwd"] != nil {
 		testingContext.Fatalf("config = %#v", body)
 	}
 	if body["auth"] != true || body["hub"] != true || body["ws_path"] != "/ws" {
 		testingContext.Fatalf("config feature fields = %#v", body)
+	}
+	if body["proxy"] != false || body["ide"] != false || containsString(body["features"], "review") || !containsString(body["features"], "session-history") {
+		testingContext.Fatalf("config advertised unsupported capabilities = %#v", body)
 	}
 	if body["agent_port"] != float64(35419) {
 		testingContext.Fatalf("agent port = %#v", body["agent_port"])
 	}
 	if len(response.Result().Cookies()) != 1 {
 		testingContext.Fatalf("authorized config cookies = %#v", response.Result().Cookies())
+	}
+}
+
+func TestPersistedRuntimeConfigContainsNoPairingMaterial(testingContext *testing.T) {
+	fixture := newRouteTestServer(testingContext)
+	path := filepath.Join(fixture.server.configuration.DataDirectory, "runtime-config.json")
+	data, errorValue := os.ReadFile(path)
+	if errorValue != nil {
+		testingContext.Fatal(errorValue)
+	}
+	contents := string(data)
+	if strings.Contains(contents, routeTestSecret) || strings.Contains(contents, "?key=") || strings.Contains(contents, `"ui"`) || strings.Contains(contents, `"watch"`) {
+		testingContext.Fatalf("runtime config persisted pairing material: %s", contents)
+	}
+	info, errorValue := os.Stat(path)
+	if errorValue != nil {
+		testingContext.Fatal(errorValue)
+	}
+	if info.Mode().Perm() != 0o600 {
+		testingContext.Fatalf("runtime config mode = %o", info.Mode().Perm())
 	}
 }
 
@@ -141,35 +195,35 @@ func TestServerFSRoutes(testingContext *testing.T) {
 		testingContext.Fatal(errorValue)
 	}
 
-	response := fixture.request(testingContext, http.MethodGet, "/api/fs/root", nil, remotePeer, true)
+	response := fixture.request(testingContext, http.MethodGet, "/api/fs/root?sessionId="+routeSessionID, nil, remotePeer, true)
 	assertStatus(testingContext, response, http.StatusOK)
 	root := decodeObject(testingContext, response)
 	if root["root"] != fixture.root || root["exists"] != true {
 		testingContext.Fatalf("root = %#v", root)
 	}
 
-	response = fixture.request(testingContext, http.MethodGet, "/api/fs/list?path=.", nil, remotePeer, true)
+	response = fixture.request(testingContext, http.MethodGet, "/api/fs/list?sessionId="+routeSessionID+"&path=.", nil, remotePeer, true)
 	assertStatus(testingContext, response, http.StatusOK)
 	listing := decodeObject(testingContext, response)
 	if !containsNamedItem(listing["files"], "seed.txt") || !containsNamedItem(listing["dirs"], "docs") {
 		testingContext.Fatalf("listing = %#v", listing)
 	}
 
-	response = fixture.request(testingContext, http.MethodGet, "/api/fs/read?path=seed.txt", nil, remotePeer, true)
+	response = fixture.request(testingContext, http.MethodGet, "/api/fs/read?sessionId="+routeSessionID+"&path=seed.txt", nil, remotePeer, true)
 	assertStatus(testingContext, response, http.StatusOK)
 	read := decodeObject(testingContext, response)
 	if read["content"] != "seed content" || read["text"] != true {
 		testingContext.Fatalf("read = %#v", read)
 	}
 
-	response = fixture.request(testingContext, http.MethodPost, "/api/fs/mkdir", map[string]any{"path": "notes"}, remotePeer, true)
+	response = fixture.request(testingContext, http.MethodPost, "/api/fs/mkdir", map[string]any{"sessionId": routeSessionID, "path": "notes"}, remotePeer, true)
 	assertStatus(testingContext, response, http.StatusOK)
 	if info, errorValue := os.Stat(filepath.Join(fixture.root, "notes")); errorValue != nil || !info.IsDir() {
 		testingContext.Fatalf("mkdir result: info=%v err=%v", info, errorValue)
 	}
 
 	response = fixture.request(testingContext, http.MethodPost, "/api/fs/write", map[string]any{
-		"path": "notes/new.md", "content": "hello\nworld",
+		"sessionId": routeSessionID, "path": "notes/new.md", "content": "hello\nworld",
 	}, remotePeer, true)
 	assertStatus(testingContext, response, http.StatusOK)
 	written := decodeObject(testingContext, response)
@@ -181,7 +235,7 @@ func TestServerFSRoutes(testingContext *testing.T) {
 		testingContext.Fatalf("written file = %q err=%v", data, errorValue)
 	}
 
-	response = fixture.request(testingContext, http.MethodGet, "/api/fs/read?path=notes%2Fnew.md", nil, remotePeer, true)
+	response = fixture.request(testingContext, http.MethodGet, "/api/fs/read?sessionId="+routeSessionID+"&path=notes%2Fnew.md", nil, remotePeer, true)
 	assertStatus(testingContext, response, http.StatusOK)
 	if got := decodeObject(testingContext, response)["content"]; got != "hello\nworld" {
 		testingContext.Fatalf("written content = %#v", got)
@@ -191,10 +245,10 @@ func TestServerFSRoutes(testingContext *testing.T) {
 	if errorValue := os.Mkdir(alternate, 0o755); errorValue != nil {
 		testingContext.Fatal(errorValue)
 	}
-	response = fixture.request(testingContext, http.MethodPost, "/api/fs/root", map[string]any{"path": alternate}, remotePeer, true)
+	response = fixture.request(testingContext, http.MethodPost, "/api/fs/root", map[string]any{"sessionId": routeSessionID, "path": alternate}, remotePeer, true)
 	assertStatus(testingContext, response, http.StatusOK)
-	if got := decodeObject(testingContext, response)["root"]; got != alternate {
-		testingContext.Fatalf("updated root = %#v", got)
+	if got := decodeObject(testingContext, response)["root"]; got != fixture.root {
+		testingContext.Fatalf("session root changed to %#v", got)
 	}
 }
 
@@ -282,21 +336,36 @@ func TestServerVoiceStatus(testingContext *testing.T) {
 	}
 }
 
+func TestServerEffortRequiresSelectedModel(testingContext *testing.T) {
+	fixture := newRouteTestServer(testingContext)
+	response := fixture.request(testingContext, http.MethodPost, "/api/effort", map[string]any{
+		"sessionId": routeSessionID,
+		"effort":    "high",
+	}, remotePeer, true)
+	assertStatus(testingContext, response, http.StatusBadRequest)
+	if !strings.Contains(response.Body.String(), "modelId") {
+		testingContext.Fatalf("missing model response = %q", response.Body.String())
+	}
+}
+
 func TestServerPairLoopbackRestrictionAndUnknownRoute(testingContext *testing.T) {
 	fixture := newRouteTestServer(testingContext)
 
 	remote := fixture.requestWithHeaders(testingContext, http.MethodGet, "/pair", nil, remotePeer, http.Header{
-		"X-Grok-Remote-Key": {routeTestSecret},
-		"X-Forwarded-For":   {"127.0.0.1"},
+		compat.AuthenticationHeaderName: {routeTestSecret},
+		"X-Forwarded-For":               {"127.0.0.1"},
 	})
 	assertStatus(testingContext, remote, http.StatusForbidden)
 	if strings.TrimSpace(remote.Body.String()) != "pair is loopback-only" {
 		testingContext.Fatalf("remote pair body = %q", remote.Body.String())
 	}
 
-	local := fixture.request(testingContext, http.MethodGet, "/pair", nil, loopbackPeer, false)
+	unauthenticatedLocal := fixture.request(testingContext, http.MethodGet, "/pair", nil, loopbackPeer, false)
+	assertStatus(testingContext, unauthenticatedLocal, http.StatusUnauthorized)
+
+	local := fixture.request(testingContext, http.MethodGet, "/pair", nil, loopbackPeer, true)
 	assertStatus(testingContext, local, http.StatusOK)
-	if !strings.Contains(local.Body.String(), "Pair Grok Remote") || !strings.Contains(local.Body.String(), "grokremote://pair?") {
+	if !strings.Contains(local.Body.String(), "Pair Any AI CLI Remote") || !strings.Contains(local.Body.String(), "anyaicliremote://pair?") || strings.Contains(local.Body.String(), "cwd=") {
 		testingContext.Fatalf("local pair page = %s", local.Body.String())
 	}
 
@@ -308,7 +377,7 @@ func (fixture *routeTestServer) request(testingContext *testing.T, method, targe
 	testingContext.Helper()
 	headers := make(http.Header)
 	if authenticated {
-		headers.Set("X-Grok-Remote-Key", routeTestSecret)
+		headers.Set(compat.AuthenticationHeaderName, routeTestSecret)
 	}
 	return fixture.requestWithHeaders(testingContext, method, target, payload, remote, headers)
 }
@@ -378,6 +447,16 @@ func containsNamedMember(raw any, who string) bool {
 	members, _ := raw.([]any)
 	for _, rawMember := range members {
 		if member, valid := rawMember.(map[string]any); valid && member["who"] == who {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(raw any, expected string) bool {
+	values, _ := raw.([]any)
+	for _, value := range values {
+		if value == expected {
 			return true
 		}
 	}

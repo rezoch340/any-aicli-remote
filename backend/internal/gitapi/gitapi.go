@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/fsapi"
 )
 
 var (
@@ -22,8 +24,9 @@ var (
 )
 
 type Service struct {
-	workspace func() string
-	gitPath   string
+	workspace    func() string
+	rootIdentity *fsapi.RootIdentity
+	gitPath      string
 }
 
 type DirtyFile struct {
@@ -85,6 +88,15 @@ func New(workspace func() string) *Service {
 
 func NewWithGit(workspace func() string, gitPath string) *Service {
 	return &Service{workspace: workspace, gitPath: gitPath}
+}
+
+func NewPinned(rootIdentity *fsapi.RootIdentity) *Service {
+	gitPath, _ := exec.LookPath("git")
+	return &Service{rootIdentity: rootIdentity, gitPath: gitPath}
+}
+
+func NewWithPinnedGit(rootIdentity *fsapi.RootIdentity, gitPath string) *Service {
+	return &Service{rootIdentity: rootIdentity, gitPath: gitPath}
 }
 
 func (service *Service) Status(operationContext context.Context) (StatusResult, error) {
@@ -202,9 +214,14 @@ func (service *Service) Project(operationContext context.Context) (ProjectContex
 		return ProjectContext{}, operationError
 	}
 	result := ProjectContext{OK: true, Root: root, Files: []ContextFile{}}
-	rootFS, operationError := os.OpenRoot(root)
+	var rootFS *os.Root
+	if service.rootIdentity != nil {
+		rootFS, operationError = service.rootIdentity.OpenRoot()
+	} else {
+		rootFS, operationError = os.OpenRoot(root)
+	}
 	if operationError != nil {
-		return ProjectContext{}, operationError
+		return ProjectContext{}, WorkspaceUnavailableError
 	}
 	defer rootFS.Close()
 	for _, name := range []string{
@@ -253,6 +270,11 @@ func (service *Service) run(operationContext context.Context, timeout time.Durat
 	defer cancel()
 	command := exec.CommandContext(runContext, service.gitPath, arguments...)
 	command.Dir = root
+	if service.rootIdentity != nil {
+		if operationError := service.rootIdentity.Validate(); operationError != nil {
+			return commandResult{}, WorkspaceUnavailableError
+		}
+	}
 	stdout, operationError := command.Output()
 	if runContext.Err() != nil {
 		return commandResult{}, runContext.Err()
@@ -268,6 +290,12 @@ func (service *Service) run(operationContext context.Context, timeout time.Durat
 }
 
 func (service *Service) root() (string, error) {
+	if service.rootIdentity != nil {
+		if operationError := service.rootIdentity.Validate(); operationError != nil {
+			return "", WorkspaceUnavailableError
+		}
+		return service.rootIdentity.Path(), nil
+	}
 	if service.workspace == nil {
 		return "", WorkspaceUnavailableError
 	}

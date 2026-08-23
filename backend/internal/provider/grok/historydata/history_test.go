@@ -1,4 +1,4 @@
-package history
+package historydata
 
 import (
 	"encoding/json"
@@ -6,65 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
-func TestFindSessionDirectoryectoryPrefersWorkingDirectoryAndUsesIndexFallback(testContext *testing.T) {
-	root := testContext.TempDir()
-	workingDirectory := filepath.Join(testContext.TempDir(), "project with space")
-	if operationError := os.MkdirAll(workingDirectory, 0o755); operationError != nil {
-		testContext.Fatal(operationError)
-	}
-
-	sessionID := "sess-123"
-	wanted := mkdirSession(testContext, root, workingDirectory, sessionID)
-	other := mkdirSession(testContext, root, filepath.Join(testContext.TempDir(), "other"), sessionID)
-	if operationError := os.WriteFile(filepath.Join(wanted, "updates.jsonl"), nil, 0o644); operationError != nil {
-		testContext.Fatal(operationError)
-	}
-	if operationError := os.WriteFile(filepath.Join(other, "updates.jsonl"), nil, 0o644); operationError != nil {
-		testContext.Fatal(operationError)
-	}
-
-	store := NewStore(root)
-	got, valid := store.FindSessionDirectory(sessionID, workingDirectory)
-	if !valid || got != wanted {
-		testContext.Fatalf("FindSessionDirectory(cwd) = %q,%v want %q,true", got, valid, wanted)
-	}
-	if _, valid := store.FindSessionDirectory("../bad", workingDirectory); valid {
-		testContext.Fatalf("invalid session id resolved")
-	}
-
-	older := time.Now().Add(-2 * time.Hour)
-	newer := time.Now().Add(-time.Hour)
-	if operationError := os.Chtimes(filepath.Join(other, "updates.jsonl"), older, older); operationError != nil {
-		testContext.Fatal(operationError)
-	}
-	if operationError := os.Chtimes(filepath.Join(wanted, "updates.jsonl"), newer, newer); operationError != nil {
-		testContext.Fatal(operationError)
-	}
-	got, valid = NewStore(root).FindSessionDirectory(sessionID, "")
-	if !valid || got != wanted {
-		testContext.Fatalf("FindSessionDirectory(index) = %q,%v want newest %q,true", got, valid, wanted)
-	}
-}
-
-func TestReadSessionInfoTitleAndWorkingDirectoryPrecedence(testContext *testing.T) {
-	directory := testContext.TempDir()
-	writeJSON(testContext, filepath.Join(directory, "summary.json"), map[string]any{
-		"remote_title":    " Remote ",
-		"generated_title": "Generated",
-		"session_summary": "Summary",
-		"cwd":             "/fallback",
-		"info":            map[string]any{"cwd": " /from-info "},
-	})
-	info := ReadSessionInfo(directory)
-	if info.Title != "Remote" || info.WorkingDirectory != "/from-info" {
-		testContext.Fatalf("ReadSessionInfo = %+v", info)
-	}
-}
-
-func TestReadSessionUpdatesChatOnlyCoalescesAndPaginatesBefore(testContext *testing.T) {
+func TestReadSessionUpdatesFromRootChatOnlyCoalescesAndPaginatesBefore(testContext *testing.T) {
 	directory := testContext.TempDir()
 	path := filepath.Join(directory, "updates.jsonl")
 	appendLines(testContext, path,
@@ -78,7 +22,7 @@ func TestReadSessionUpdatesChatOnlyCoalescesAndPaginatesBefore(testContext *test
 		updateLine("s", "agent_message_chunk", "!", nil),
 	)
 
-	events, meta := ReadSessionUpdates(directory, ReadOptions{Limit: 2, MaxBytes: 128, ChatOnly: true})
+	events, meta := readSessionUpdates(testContext, directory, ReadOptions{Limit: 2, MaxBytes: 128, ChatOnly: true})
 	if len(events) != 2 {
 		testContext.Fatalf("got %d events: %#v", len(events), events)
 	}
@@ -101,7 +45,7 @@ func TestReadSessionUpdatesChatOnlyCoalescesAndPaginatesBefore(testContext *test
 		}
 	}
 
-	older, olderMeta := ReadSessionUpdates(directory, ReadOptions{Limit: 2, MaxBytes: 128, BeforeBytes: &olderBefore, ChatOnly: true})
+	older, olderMeta := readSessionUpdates(testContext, directory, ReadOptions{Limit: 2, MaxBytes: 128, BeforeBytes: &olderBefore, ChatOnly: true})
 	if len(older) != 2 || textAt(testContext, older[0]) != "u1" || textAt(testContext, older[1]) != "a1" {
 		testContext.Fatalf("older page events=%#v meta=%#v", older, olderMeta)
 	}
@@ -110,7 +54,7 @@ func TestReadSessionUpdatesChatOnlyCoalescesAndPaginatesBefore(testContext *test
 	}
 }
 
-func TestReadSessionUpdatesFullFiltersAndMergesMeta(testContext *testing.T) {
+func TestReadSessionUpdatesFromRootFullFiltersAndMergesMeta(testContext *testing.T) {
 	directory := testContext.TempDir()
 	path := filepath.Join(directory, "updates.jsonl")
 	appendLines(testContext, path,
@@ -122,7 +66,7 @@ func TestReadSessionUpdatesFullFiltersAndMergesMeta(testContext *testing.T) {
 		updateLine("s", "available_commands_update", "", map[string]any{"commands": []any{"/x"}}),
 	)
 
-	events, meta := ReadSessionUpdates(directory, ReadOptions{Limit: 20, MaxBytes: 4096})
+	events, meta := readSessionUpdates(testContext, directory, ReadOptions{Limit: 20, MaxBytes: 4096})
 	if len(events) != 4 {
 		testContext.Fatalf("got %d events: %#v meta=%#v", len(events), events, meta)
 	}
@@ -141,20 +85,20 @@ func TestReadSessionUpdatesFullFiltersAndMergesMeta(testContext *testing.T) {
 	}
 }
 
-func TestReadSessionUpdatesLiveSinceAndIncompleteTail(testContext *testing.T) {
+func TestReadSessionUpdatesFromRootLiveSinceAndIncompleteTail(testContext *testing.T) {
 	directory := testContext.TempDir()
 	path := filepath.Join(directory, "updates.jsonl")
 	appendLines(testContext, path, updateLine("s", "user_message_chunk", "old", nil))
-	store, operationError := os.Stat(path)
+	fileInfo, operationError := os.Stat(path)
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	since := store.Size()
+	since := fileInfo.Size()
 	good := updateLine("s", "agent_message_chunk", "new", nil)
 	partial := strings.TrimSuffix(updateLine("s", "agent_message_chunk", "partial", nil), "\n")[:40]
 	appendRaw(testContext, path, good+partial)
 
-	events, meta := ReadSessionUpdates(directory, ReadOptions{Limit: 10, SinceBytes: since, Live: true, MaxBytes: 512_000})
+	events, meta := readSessionUpdates(testContext, directory, ReadOptions{Limit: 10, SinceBytes: since, Live: true, MaxBytes: 512_000})
 	if len(events) != 1 || textAt(testContext, events[0]) != "new" {
 		testContext.Fatalf("live events=%#v meta=%#v", events, meta)
 	}
@@ -163,17 +107,17 @@ func TestReadSessionUpdatesLiveSinceAndIncompleteTail(testContext *testing.T) {
 	}
 
 	end := meta["size"].(int64)
-	empty, emptyMeta := ReadSessionUpdates(directory, ReadOptions{SinceBytes: end, Live: true})
+	empty, emptyMeta := readSessionUpdates(testContext, directory, ReadOptions{SinceBytes: end, Live: true})
 	if len(empty) != 0 || emptyMeta["returned"] != 0 || emptyMeta["end"] != end {
 		testContext.Fatalf("empty live events=%#v meta=%#v", empty, emptyMeta)
 	}
 }
 
-func TestReadSessionUpdatesTrimsLongChatText(testContext *testing.T) {
+func TestReadSessionUpdatesFromRootTrimsLongChatText(testContext *testing.T) {
 	directory := testContext.TempDir()
 	path := filepath.Join(directory, "updates.jsonl")
 	appendLines(testContext, path, updateLine("s", "user_message_chunk", strings.Repeat("x", chatTextCap+10), nil))
-	events, _ := ReadSessionUpdates(directory, ReadOptions{Limit: 1, MaxBytes: int64(chatTextCap + 4096), ChatOnly: true})
+	events, _ := readSessionUpdates(testContext, directory, ReadOptions{Limit: 1, MaxBytes: int64(chatTextCap + 4096), ChatOnly: true})
 	if len(events) != 1 {
 		testContext.Fatalf("events=%#v", events)
 	}
@@ -181,22 +125,6 @@ func TestReadSessionUpdatesTrimsLongChatText(testContext *testing.T) {
 	if len(text) <= chatTextCap || !strings.Contains(text, "truncated for load speed") {
 		testContext.Fatalf("text was not trimmed: len=%d suffix=%q", len(text), text[len(text)-40:])
 	}
-}
-
-func mkdirSession(testContext *testing.T, root, workingDirectory, sessionID string) string {
-	testContext.Helper()
-	absolutePath, operationError := filepath.Abs(workingDirectory)
-	if operationError != nil {
-		testContext.Fatal(operationError)
-	}
-	if resolved, operationError := filepath.EvalSymlinks(absolutePath); operationError == nil {
-		absolutePath = resolved
-	}
-	directory := filepath.Join(root, EncodeSessionWorkingDirectory(absolutePath), sessionID)
-	if operationError := os.MkdirAll(directory, 0o755); operationError != nil {
-		testContext.Fatal(operationError)
-	}
-	return directory
 }
 
 func updateLine(sessionID, kind, text string, extra map[string]any) string {
@@ -226,15 +154,14 @@ func updateLineWithMeta(sessionID, kind, text string, extra, paramsMeta, updateM
 	return string(data) + "\n"
 }
 
-func writeJSON(testContext *testing.T, path string, value any) {
+func readSessionUpdates(testContext *testing.T, directory string, options ReadOptions) ([]Event, Meta) {
 	testContext.Helper()
-	data, operationError := json.Marshal(value)
+	sessionRoot, operationError := os.OpenRoot(directory)
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	if operationError := os.WriteFile(path, data, 0o644); operationError != nil {
-		testContext.Fatal(operationError)
-	}
+	defer sessionRoot.Close()
+	return ReadSessionUpdatesFromRoot(sessionRoot, filepath.Join(directory, "updates.jsonl"), options)
 }
 
 func appendLines(testContext *testing.T, path string, lines ...string) {
