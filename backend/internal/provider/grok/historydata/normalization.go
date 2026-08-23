@@ -18,6 +18,9 @@ var historyKeep = map[string]struct{}{
 	"turn_completed":            {},
 	"task_completed":            {},
 	"available_commands_update": {},
+	"subagent_spawned":          {},
+	"subagent_progress":         {},
+	"subagent_finished":         {},
 }
 
 var terminalToolStatuses = map[string]struct{}{

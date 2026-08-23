@@ -188,3 +188,56 @@ func TestRenameUsesPolicyRuneLimit(testContext *testing.T) {
 		testContext.Fatalf("title=%q err=%v", providerInstance.lastRenameTitle, errorValue)
 	}
 }
+
+type sessionChildAgentProvider struct {
+	*sessionTestProvider
+	childAgents      []providerapi.ChildAgentRecord
+	childAgentsError error
+}
+
+func (providerInstance *sessionChildAgentProvider) ListChildAgents(context.Context, string) ([]providerapi.ChildAgentRecord, error) {
+	if providerInstance.childAgentsError != nil {
+		return nil, providerInstance.childAgentsError
+	}
+	return providerInstance.childAgents, nil
+}
+
+func TestHistoryReturnsNonNilEmptyChildAgentsWithoutCapability(testContext *testing.T) {
+	service := newSessionService(testContext)
+	history, operationError := service.History(context.Background(), HistoryQuery{SessionID: "session-one"})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if history.ChildAgents == nil || len(history.ChildAgents) != 0 {
+		testContext.Fatalf("childAgents = %#v", history.ChildAgents)
+	}
+}
+
+func TestHistoryUsesChildAgentSourceWhenAvailable(testContext *testing.T) {
+	baseProvider := &sessionTestProvider{metadata: providerapi.SessionMetadata{ProviderID: "test", SessionID: "session-one", Title: "Original", ProjectDirectory: testContext.TempDir(), SourcePath: testContext.TempDir() + "/summary.json"}}
+	providerInstance := &sessionChildAgentProvider{sessionTestProvider: baseProvider, childAgents: []providerapi.ChildAgentRecord{{ProviderChildID: "child-1", ParentSessionID: "session-one", Status: providerapi.ChildAgentStatusRunning, ToolsUsed: []string{}}}}
+	service, operationError := New(providerapi.NewRegistry(providerInstance), "test", testContext.TempDir(), testHistoryPolicy())
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	history, operationError := service.History(context.Background(), HistoryQuery{SessionID: "session-one"})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if len(history.ChildAgents) != 1 || history.ChildAgents[0].ProviderChildID != "child-1" || history.ChildAgents[0].ToolsUsed == nil {
+		testContext.Fatalf("childAgents = %#v", history.ChildAgents)
+	}
+}
+
+func TestHistoryPropagatesChildAgentErrors(testContext *testing.T) {
+	baseProvider := &sessionTestProvider{metadata: providerapi.SessionMetadata{ProviderID: "test", SessionID: "session-one", Title: "Original", ProjectDirectory: testContext.TempDir(), SourcePath: testContext.TempDir() + "/summary.json"}}
+	providerInstance := &sessionChildAgentProvider{sessionTestProvider: baseProvider, childAgentsError: os.ErrPermission}
+	service, operationError := New(providerapi.NewRegistry(providerInstance), "test", testContext.TempDir(), testHistoryPolicy())
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	_, operationError = service.History(context.Background(), HistoryQuery{SessionID: "session-one"})
+	if operationError == nil || !os.IsPermission(operationError) {
+		testContext.Fatalf("error = %v", operationError)
+	}
+}

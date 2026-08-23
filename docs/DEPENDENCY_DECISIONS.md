@@ -358,3 +358,12 @@ is macOS and Linux; renameio's documented platform support does not include Wind
 - Chosen: `SimplyDanny/SwiftLintPlugins` exact `0.65.0`, using its pinned `SwiftLintCommandPlugin` binary. The tooling package intentionally has no source targets; `Package.resolved` records the exact dependency and artifact revision.
 - Decision: run one command-plugin invocation over `ios` and `apple/Shared` with strict zero-issue configuration. The repository script also enforces a 600-physical-line ceiling for production Kotlin and Swift files without implementing a language parser.
 - Boundary: an Xcode build-tool plugin is not used because the target's `../apple/Shared` sources are outside the project directory and the upstream plugin documents that working-directory limitation. Generated Xcode projects and DerivedData are excluded; this gate does not replace compiler or platform analysis.
+
+## 子 Agent 生命周期
+
+- Checked: 当前稳定发布的 [`coder/acp-go-sdk`](https://github.com/coder/acp-go-sdk) `v0.13.5`，以及其已发布 stable surface；同时核对 ACP 公开 lifecycle RFD/讨论，确认截至 2026-08-23 仍无已发布的标准子 Agent lifecycle types/constants 可直接复用。
+- Checked: 本仓库锁定的 Grok 事实边界为本机 CLI `1.0.5` 与官方 [`xai-org/grok-build` commit `07b2f7144fd5c5c9d3dd1966937a87852d2dbdb8`](https://github.com/xai-org/grok-build/commit/07b2f7144fd5c5c9d3dd1966937a87852d2dbdb8)；当前 child-agent 仅存在于 Grok 私有 `x.ai` wire/update 形态，不属于 ACP 已发布公共模型。
+- Decision: 继续复用 ACP SDK 的标准 JSON-RPC envelope、typed ACP requests/responses、method constants；Grok 私有 child-agent 字段只允许在 Grok adapter 内做 provider-neutral 映射，不新增 lifecycle 专用依赖，不复制第二套通用 protocol/parser/model。
+- Boundary: `_meta.eventId` 后缀单调序号是唯一稳定的 ordered/dedupe 依据；adapter 只解析并透传该后缀，不发明独立计数器或重排序状态机。
+- Boundary: `subagent_progress` 属于 transient live notification；`_x.ai/session/update` 持久化记录与 `subagents/*/meta.json` snapshot 才是 reconnect/history 重建来源。实现必须统一走同一 adapter 映射，禁止复制第二套 history parser、snapshot mapper、或 child-agent cache。
+- Boundary: 若未来 ACP 或 xAI 发布维护中的正式 lifecycle SDK/模型，应仓库级替换当前薄适配层；在此之前不得叠加并行实现。

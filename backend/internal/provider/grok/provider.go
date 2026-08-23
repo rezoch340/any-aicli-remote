@@ -176,7 +176,21 @@ func (providerInstance *GrokProvider) ReadHistory(operationContext context.Conte
 	}
 	convertedEvents := make([]providerapi.Event, 0, len(events))
 	for _, event := range events {
-		convertedEvents = append(convertedEvents, providerapi.Event(event))
+		convertedEvent := providerapi.Event(event)
+		method, _ := convertedEvent["method"].(string)
+		params, _ := convertedEvent["params"].(map[string]any)
+		if normalizedMethod, normalizedParams, handled := providerInstance.normalizeChildAgentNotification(method, params); handled {
+			if normalizedMethod == "" {
+				continue
+			}
+			normalizedSessionID, _ := normalizedParams["sessionId"].(string)
+			if strings.TrimSpace(normalizedSessionID) != metadata.SessionID {
+				continue
+			}
+			convertedEvent["method"] = normalizedMethod
+			convertedEvent["params"] = normalizedParams
+		}
+		convertedEvents = append(convertedEvents, convertedEvent)
 	}
 	convertedMetadata := providerapi.HistoryMetadata(historyMetadata)
 	convertedMetadata["resolvedSid"] = metadata.SessionID

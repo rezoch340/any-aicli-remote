@@ -175,6 +175,9 @@ func (providerInstance *GrokProvider) EffortRequest(sessionID string, modelID st
 }
 
 func (providerInstance *GrokProvider) NormalizeAgentNotification(method string, params map[string]any) (string, map[string]any) {
+	if normalizedMethod, normalizedParams, handled := providerInstance.normalizeChildAgentNotification(method, params); handled {
+		return normalizedMethod, normalizedParams
+	}
 	switch method {
 	case "_x.ai/session/update", "x.ai/session/update":
 		return "session/update", params

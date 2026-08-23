@@ -133,6 +133,54 @@ they must not rebuild the entire transcript on each chunk. The Hub adds the auth
 `providerId` to every session-scoped notification. Clients fail closed when either identity is missing
 or when `(providerId, sessionId)` does not match the open conversation.
 
+### Provider-neutral child Agent updates
+
+The daemon normalizes Provider child-Agent lifecycle notifications to one method:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/child_agent_update",
+  "params": {
+    "providerId": "grok",
+    "sessionId": "parent-session",
+    "event": {
+      "eventId": "parent-session-11",
+      "sequence": 11,
+      "occurredAt": 1776900123000,
+      "replay": false,
+      "kind": "completed",
+      "agent": {
+        "providerChildId": "child-1",
+        "parentSessionId": "parent-session",
+        "childSessionId": "child-session-1",
+        "status": "completed",
+        "description": "Index project files and run focused tests.",
+        "durationMs": 8421,
+        "toolCallCount": 3,
+        "turnCount": 2,
+        "tokensUsed": 1840,
+        "toolsUsed": ["grep", "go test"]
+      }
+    }
+  }
+}
+```
+
+`kind` is fixed to `started`, `progress`, `completed`, `failed`, `cancelled`, or `updated`.
+`status` is fixed to `running`, `completed`, `failed`, `cancelled`, or `unknown`.
+
+`sequence` comes from the Provider's durable event ID suffix and is allowed to be `0`. Clients should
+track `(providerId, sessionId, providerChildId)` and use `sequence` for deduplication and for rejecting
+older lifecycle state that arrives late. `progress` is transient and may omit `sequence`; when that
+happens, clients should treat `durationMs` as a non-decreasing progress signal for the same running
+entity, and a terminal state (`completed`, `failed`, `cancelled`) must never be downgraded by a later
+or replayed `progress` update.
+
+Prompt text, output text, error text, terminal streams, and Markdown never enter this payload. Grok
+child-Agent extensions that are malformed or use unknown `subagent_*` variants fail closed and are not
+forwarded to clients.
+
 ## Reverse requests
 
 ACP file and terminal requests include `sessionId`. The daemon validates the request against the
@@ -210,6 +258,16 @@ The compatibility history endpoint remains:
 ```text
 GET /api/session/history?sessionId=...&limit=400&chat_only=1
 ```
+
+The response always includes a non-null `childAgents: []` snapshot for the parent session, even when
+`chat_only=1` filters lifecycle events out of the `events` array. For Grok, persisted child-Agent
+lifecycle records are normalized to the same `session/child_agent_update` shape described above and
+preserve on-disk file order inside `events`.
+
+On reconnect, clients should rebuild child-Agent state from `childAgents` first, then merge replayed
+`session/child_agent_update` events by `sequence`/`eventId`. History truncation or filtering may remove
+older lifecycle events, but it must not remove the authoritative `childAgents` snapshot. `chat_only=1`
+may hide lifecycle events from `events` while still returning the snapshot needed for state recovery.
 
 The server resolves Provider and workspace from the session. A legacy `cwd` parameter is not an
 authority for changing the session binding.

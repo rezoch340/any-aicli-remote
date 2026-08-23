@@ -67,16 +67,17 @@ type HistoryQuery struct {
 }
 
 type HistoryResult struct {
-	OK               bool                        `json:"ok"`
-	Error            string                      `json:"error,omitempty"`
-	ProviderID       string                      `json:"providerId"`
-	SessionID        string                      `json:"sessionId"`
-	WorkingDirectory string                      `json:"cwd"`
-	Title            string                      `json:"title"`
-	Directory        string                      `json:"dir"`
-	Events           []providerapi.Event         `json:"events"`
-	Meta             providerapi.HistoryMetadata `json:"meta"`
-	Count            int                         `json:"count"`
+	OK               bool                           `json:"ok"`
+	Error            string                         `json:"error,omitempty"`
+	ProviderID       string                         `json:"providerId"`
+	SessionID        string                         `json:"sessionId"`
+	WorkingDirectory string                         `json:"cwd"`
+	Title            string                         `json:"title"`
+	Directory        string                         `json:"dir"`
+	Events           []providerapi.Event            `json:"events"`
+	Meta             providerapi.HistoryMetadata    `json:"meta"`
+	Count            int                            `json:"count"`
+	ChildAgents      []providerapi.ChildAgentRecord `json:"childAgents"`
 }
 
 func (service *Service) History(operationContext context.Context, query HistoryQuery) (HistoryResult, error) {
@@ -97,7 +98,7 @@ func (service *Service) History(operationContext context.Context, query HistoryQ
 		BeforeBytes: query.BeforeBytes, MaxBytes: maxBytes, ChatOnly: query.ChatOnly,
 	})
 	if operationError != nil {
-		result := HistoryResult{OK: false, Error: NotFoundError.Error(), ProviderID: providerInstance.ID(), SessionID: sessionID, Events: []providerapi.Event{}, Meta: providerapi.HistoryMetadata{"has_more": false}}
+		result := HistoryResult{OK: false, Error: NotFoundError.Error(), ProviderID: providerInstance.ID(), SessionID: sessionID, Events: []providerapi.Event{}, ChildAgents: []providerapi.ChildAgentRecord{}, Meta: providerapi.HistoryMetadata{"has_more": false}}
 		if errors.Is(operationError, providerapi.SessionNotFoundError) {
 			return result, NotFoundError
 		}
@@ -113,10 +114,21 @@ func (service *Service) History(operationContext context.Context, query HistoryQ
 	if page.Metadata == nil {
 		page.Metadata = providerapi.HistoryMetadata{}
 	}
+	childAgents := []providerapi.ChildAgentRecord{}
+	if source, supported := providerInstance.(providerapi.ChildAgentSource); supported {
+		var childError error
+		childAgents, childError = source.ListChildAgents(operationContext, page.Session.SessionID)
+		if childError != nil {
+			return HistoryResult{}, childError
+		}
+		if childAgents == nil {
+			childAgents = []providerapi.ChildAgentRecord{}
+		}
+	}
 	return HistoryResult{
 		OK: true, ProviderID: page.Session.ProviderID, SessionID: page.Session.SessionID,
 		WorkingDirectory: page.Session.ProjectDirectory, Title: page.Session.Title, Directory: directory,
-		Events: page.Events, Meta: page.Metadata, Count: len(page.Events),
+		Events: page.Events, Meta: page.Metadata, Count: len(page.Events), ChildAgents: childAgents,
 	}, nil
 }
 

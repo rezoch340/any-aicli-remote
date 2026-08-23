@@ -142,7 +142,7 @@ func readLive(updatesFile *os.File, path string, size, since int64, limit int, m
 		if len(line) == 0 {
 			continue
 		}
-		if !containsAnyBytes(line, [][]byte{[]byte("user_message_chunk"), []byte("agent_message_chunk"), []byte("agent_thought_chunk"), []byte("tool_call"), []byte("turn_completed"), []byte("task_completed"), []byte("plan"), []byte("session_recap")}) {
+		if !containsAnyBytes(line, [][]byte{[]byte("user_message_chunk"), []byte("agent_message_chunk"), []byte("agent_thought_chunk"), []byte("tool_call"), []byte("turn_completed"), []byte("task_completed"), []byte("plan"), []byte("session_recap"), []byte("subagent_spawned"), []byte("subagent_progress"), []byte("subagent_finished")}) {
 			continue
 		}
 		event := parseUpdateLine(string(bytes.TrimRight(line, "\r")), true)

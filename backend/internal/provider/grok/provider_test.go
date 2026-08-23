@@ -407,3 +407,58 @@ func mustReadFile(testContext *testing.T, path string) []byte {
 	}
 	return data
 }
+
+func TestReadHistoryNormalizesChildAgentEventsWithoutSecrets(testContext *testing.T) {
+	activeRoot := filepath.Join(testContext.TempDir(), "sessions")
+	workingDirectory := testContext.TempDir()
+	summaryPath := writeSummary(testContext, activeRoot, "project", "child-history", workingDirectory, "history", "2026-01-02T00:00:00Z")
+	updates := strings.Join([]string{
+		`{"method":"_x.ai/session/update","params":{"sessionId":"child-history","update":{"sessionUpdate":"subagent_spawned","subagent_id":"child-1","child_session_id":"child-session-1","subagent_type":"code","description":"spawned","model":"grok-4.6"},"_meta":{"eventId":"child-history-10","agentTimestampMs":1700000010000}}}`,
+		`{"method":"_x.ai/session/update","params":{"sessionId":"other-parent","update":{"sessionUpdate":"subagent_progress","subagent_id":"child-2","child_session_id":"child-session-2","parent_session_id":"other-parent","tool_call_count":2},"_meta":{"eventId":"other-parent-10","agentTimestampMs":1700000012500}}}`,
+		`{"method":"_x.ai/session/update","params":{"sessionId":"child-history","update":{"sessionUpdate":"subagent_finished","subagent_id":"child-1","child_session_id":"child-session-1","status":"completed","duration_ms":5,"tool_calls":2,"turns":3,"tokens_used":4,"output":"secret final output","error":"secret failure detail"},"_meta":{"eventId":"child-history-11","agentTimestampMs":1700000015000}}}`,
+	}, "\n") + "\n"
+	if operationError := os.WriteFile(filepath.Join(filepath.Dir(summaryPath), "updates.jsonl"), []byte(updates), 0o644); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot})
+	page, operationError := providerInstance.ReadHistory(context.Background(), providerapi.HistoryQuery{SessionID: "child-history", Limit: 10, MaxBytes: 4096})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if len(page.Events) != 2 {
+		testContext.Fatalf("events = %#v", page.Events)
+	}
+	if page.Events[0]["method"] != providerapi.ChildAgentUpdateMethod || page.Events[1]["method"] != providerapi.ChildAgentUpdateMethod {
+		testContext.Fatalf("methods = %#v", page.Events)
+	}
+	firstEvent := decodeChildHistoryEvent(testContext, page.Events[0])
+	secondEvent := decodeChildHistoryEvent(testContext, page.Events[1])
+	if firstEvent.Kind != providerapi.ChildAgentEventStarted || secondEvent.Kind != providerapi.ChildAgentEventCompleted || firstEvent.Agent.Status != providerapi.ChildAgentStatusRunning || secondEvent.Agent.Status != providerapi.ChildAgentStatusCompleted {
+		testContext.Fatalf("events = %#v %#v", firstEvent, secondEvent)
+	}
+	if firstEvent.Sequence == nil || *firstEvent.Sequence != 10 || secondEvent.Sequence == nil || *secondEvent.Sequence != 11 {
+		testContext.Fatalf("sequences = %#v %#v", firstEvent.Sequence, secondEvent.Sequence)
+	}
+	encoded, marshalError := json.Marshal(page.Events)
+	if marshalError != nil {
+		testContext.Fatal(marshalError)
+	}
+	if strings.Contains(string(encoded), "secret final output") || strings.Contains(string(encoded), "secret failure detail") || strings.Contains(string(encoded), "other-parent") {
+		testContext.Fatalf("secret or mismatched parent leaked in history events: %s", encoded)
+	}
+}
+
+func decodeChildHistoryEvent(testContext *testing.T, event providerapi.Event) providerapi.ChildAgentEvent {
+	testContext.Helper()
+	params, _ := event["params"].(map[string]any)
+	encoded, marshalError := json.Marshal(params["event"])
+	if marshalError != nil {
+		testContext.Fatal(marshalError)
+	}
+	var decoded providerapi.ChildAgentEvent
+	if operationError := json.Unmarshal(encoded, &decoded); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	return decoded
+}

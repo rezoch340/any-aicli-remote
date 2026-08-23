@@ -169,7 +169,7 @@ func TestServerRemoteAuthAndConfig(testingContext *testing.T) {
 	if body["auth"] != true || body["hub"] != true || body["ws_path"] != "/ws" {
 		testingContext.Fatalf("config feature fields = %#v", body)
 	}
-	if body["proxy"] != false || body["ide"] != false || containsString(body["features"], "review") || !containsString(body["features"], "session-history") {
+	if body["proxy"] != false || body["ide"] != false || containsString(body["features"], "review") || !containsString(body["features"], "session-history") || !containsString(body["features"], "child-agent-events") {
 		testingContext.Fatalf("config advertised unsupported capabilities = %#v", body)
 	}
 	if body["agent_port"] != float64(35419) {

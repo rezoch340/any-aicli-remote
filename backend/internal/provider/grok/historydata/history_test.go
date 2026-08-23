@@ -316,3 +316,27 @@ func TestReadLiveSinceCannotBypassMaxBytes(testingContext *testing.T) {
 		}
 	}
 }
+
+func TestReadSessionUpdatesFromRootPreservesChildAgentOrderInLiveAndFull(testContext *testing.T) {
+	directory := testContext.TempDir()
+	path := filepath.Join(directory, "updates.jsonl")
+	appendLines(testContext, path,
+		updateLineWithMeta("parent", "subagent_spawned", "", map[string]any{"subagent_id": "child-1", "child_session_id": "child-session-1"}, map[string]any{"eventId": "parent-10"}, nil),
+		updateLineWithMeta("parent", "subagent_progress", "", map[string]any{"subagent_id": "child-1", "child_session_id": "child-session-1"}, map[string]any{"eventId": "parent-11"}, nil),
+		updateLineWithMeta("parent", "subagent_finished", "", map[string]any{"subagent_id": "child-1", "child_session_id": "child-session-1", "status": "completed"}, map[string]any{"eventId": "parent-12"}, nil),
+	)
+
+	fullEvents, _ := readSessionUpdates(testContext, directory, ReadOptions{Limit: 10, MaxBytes: 4096})
+	if len(fullEvents) != 3 || kindAt(testContext, fullEvents[0]) != "subagent_spawned" || kindAt(testContext, fullEvents[1]) != "subagent_progress" || kindAt(testContext, fullEvents[2]) != "subagent_finished" {
+		testContext.Fatalf("full child agent order = %#v", fullEvents)
+	}
+	fullMeta := metaAt(testContext, fullEvents[1])
+	if fullMeta["eventId"] != "parent-11" {
+		testContext.Fatalf("progress meta missing: %#v", fullMeta)
+	}
+
+	liveEvents, _ := readSessionUpdates(testContext, directory, ReadOptions{Limit: 10, Live: true, MaxBytes: 4096})
+	if len(liveEvents) != 3 || kindAt(testContext, liveEvents[0]) != "subagent_spawned" || kindAt(testContext, liveEvents[1]) != "subagent_progress" || kindAt(testContext, liveEvents[2]) != "subagent_finished" {
+		testContext.Fatalf("live child agent order = %#v", liveEvents)
+	}
+}
