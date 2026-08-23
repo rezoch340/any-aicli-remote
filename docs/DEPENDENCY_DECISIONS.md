@@ -367,3 +367,11 @@ is macOS and Linux; renameio's documented platform support does not include Wind
 - Boundary: `_meta.eventId` 后缀单调序号是唯一稳定的 ordered/dedupe 依据；adapter 只解析并透传该后缀，不发明独立计数器或重排序状态机。
 - Boundary: `subagent_progress` 属于 transient live notification；`_x.ai/session/update` 持久化记录与 `subagents/*/meta.json` snapshot 才是 reconnect/history 重建来源。实现必须统一走同一 adapter 映射，禁止复制第二套 history parser、snapshot mapper、或 child-agent cache。
 - Boundary: 若未来 ACP 或 xAI 发布维护中的正式 lifecycle SDK/模型，应仓库级替换当前薄适配层；在此之前不得叠加并行实现。
+
+## Android 代码块语法高亮
+
+- Checked: 现有 `com.mikepenz:multiplatform-markdown-renderer` `0.38.1` 已提供代码围栏渲染但不含着色；其同版本可选模块 `multiplatform-markdown-renderer-code-android:0.38.1` 直接补齐着色，依赖 `dev.snipme:highlights:1.0.0`。同时核对 iOS 侧已在用的 `microsoft/SwiftStreamingMarkdown`（自带高亮与语言标签），确认两端要对齐的是同一套呈现能力而非各写一份。
+- Checked: 自写 tokenizer 需要按语言维护关键字/字符串/注释规则，明显大于缺失行为本身，且 AGENTS.md 禁止在有维护中库时新增自写 parser。
+- Decision: 加入同版本的 `-code-android` 模块，通过 `markdownComponents(codeFence = …, codeBlock = …)` 接入 `MarkdownHighlightedCodeFence`/`MarkdownHighlightedCodeBlock`，不升级既有 markdown 渲染器版本，不引入第二套 markdown 解析。
+- Boundary: 库默认的 `rememberHighlightsBuilder()` 跟随 `isSystemInDarkTheme()`；聊天区恒为深色，浅色系统下会选出深色标点，导致括号与箭头在深色底上不可见。因此固定使用 `SyntaxThemes.default(darkMode = true)`，该固定值属于呈现不变量，不是可调部署配置。
+- Boundary: 高亮只作用于助手 Markdown 的代码围栏；行内代码、表格、引用块仍由既有 `markdownTypography`/`markdownColor` 负责，不得复制第二套配色来源。

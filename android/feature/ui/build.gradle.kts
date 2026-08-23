@@ -22,6 +22,6 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2025.09.00")
     implementation(composeBom); implementation("androidx.compose.material3:material3"); implementation("androidx.compose.material:material-icons-extended"); implementation("androidx.compose.ui:ui"); implementation("androidx.compose.ui:ui-tooling-preview"); debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7"); implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7"); implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3"); implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0"); implementation("com.mikepenz:multiplatform-markdown-renderer-android:0.38.1"); implementation("com.mikepenz:multiplatform-markdown-renderer-m3-android:0.38.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3"); implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0"); implementation("com.mikepenz:multiplatform-markdown-renderer-android:0.38.1"); implementation("com.mikepenz:multiplatform-markdown-renderer-m3-android:0.38.1"); implementation("com.mikepenz:multiplatform-markdown-renderer-code-android:0.38.1")
     testImplementation("junit:junit:4.13.2")
 }

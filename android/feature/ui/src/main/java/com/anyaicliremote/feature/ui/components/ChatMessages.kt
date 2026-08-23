@@ -68,8 +68,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mikepenz.markdown.compose.components.MarkdownComponents
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownTable
+import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeBlock
+import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeFence
+import dev.snipme.highlights.Highlights
+import dev.snipme.highlights.model.SyntaxThemes
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
@@ -207,17 +212,7 @@ private fun AssistantMarkdownContent(text: String, isStreaming: Boolean) {
         dividerColor = MaterialTheme.colorScheme.outline,
         tableBackground = AnyAIColors.tableBackground,
     )
-    val markdownComponents = markdownComponents(
-        table = { model ->
-            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                MarkdownTable(
-                    content = model.content,
-                    node = model.node,
-                    style = model.typography.table,
-                )
-            }
-        },
-    )
+    val markdownComponents = rememberChatMarkdownComponents()
 
     val renderedText = rememberDisplayedMarkdown(text, isStreaming)
     val markdownState = rememberMarkdownState(
@@ -369,4 +364,43 @@ internal fun toolIcon(title: String): ImageVector {
         value.contains("file") || value.contains("read") || value.contains("write") || value.contains("edit") -> Icons.Default.Description
         else -> Icons.Default.Settings
     }
+}
+
+/**
+ * 助手 Markdown 的元素渲染组件：带语法高亮的代码围栏与可横向滚动的表格。
+ */
+@Composable
+private fun rememberChatMarkdownComponents(): MarkdownComponents {
+    // 聊天区恒为深色，与系统深浅色无关；库默认跟随 isSystemInDarkTheme()，
+    // 在浅色系统下会选出深色标点，括号与箭头在深色底上不可见。
+    val highlightsBuilder = remember {
+        Highlights.Builder().theme(SyntaxThemes.default(darkMode = true))
+    }
+    return markdownComponents(
+        codeFence = { model ->
+            MarkdownHighlightedCodeFence(
+                content = model.content,
+                node = model.node,
+                highlightsBuilder = highlightsBuilder,
+                showHeader = true,
+            )
+        },
+        codeBlock = { model ->
+            MarkdownHighlightedCodeBlock(
+                content = model.content,
+                node = model.node,
+                highlightsBuilder = highlightsBuilder,
+            )
+        },
+        table = { model ->
+            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                MarkdownTable(
+                    content = model.content,
+                    node = model.node,
+                    style = model.typography.table,
+                )
+            }
+        },
+    )
+
 }
