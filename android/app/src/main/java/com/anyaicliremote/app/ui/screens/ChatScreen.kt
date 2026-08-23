@@ -45,7 +45,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,16 +59,10 @@ import com.anyaicliremote.app.model.ChatBlockKind
 import com.anyaicliremote.app.model.ToolRunState
 import com.anyaicliremote.app.ui.ChatUiState
 import com.anyaicliremote.app.ui.ChatViewModel
-import com.anyaicliremote.app.ui.DefaultChatUiBehaviorConfiguration
 import com.anyaicliremote.app.ui.components.ChatBlockItem
 import com.anyaicliremote.app.ui.components.ChatComposer
 import com.anyaicliremote.app.ui.components.FloatingToolStatus
 import com.anyaicliremote.app.ui.components.WorkspaceFilePickerDialog
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 
 private sealed interface ChatRow {
@@ -85,10 +78,9 @@ private sealed interface ChatRow {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
-    val behavior = DefaultChatUiBehaviorConfiguration
     val session = state.selectedSession ?: return
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -100,7 +92,6 @@ internal fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     val activeTool = state.blocks.lastOrNull { it.kind == ChatBlockKind.TOOL && it.toolState in setOf(ToolRunState.PENDING, ToolRunState.RUNNING) }
     val rows = remember(state.blocks, state.busy) { buildChatRows(state.blocks, state.busy) }
     val newestFirstRows = remember(rows) { rows.reversed() }
-    val streamRevision = remember(state.blocks) { streamRevision(state.blocks) }
     val farFromBottom by remember(listState, bottomThresholdPx) {
         derivedStateOf {
             listState.firstVisibleItemIndex != 0 ||
@@ -108,30 +99,11 @@ internal fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
         }
     }
     val latestFollow by rememberUpdatedState(follow)
-    val latestRevision by rememberUpdatedState(streamRevision)
     val latestHasRows by rememberUpdatedState(rows.isNotEmpty())
-
-    LaunchedEffect(listState, session.id) {
-        snapshotFlow { latestRevision }
-            .distinctUntilChanged()
-            .conflate()
-            .sample(behavior.streamScrollSampleInterval)
-            .collect {
-                if (
-                    latestFollow && latestHasRows &&
-                    !listState.isScrollInProgress &&
-                    (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)
-                ) {
-                    listState.scrollToItem(0)
-                }
-            }
-    }
-
     val newestBlock = state.blocks.lastOrNull()
     LaunchedEffect(session.id, newestBlock?.id) {
         if (newestBlock?.kind == ChatBlockKind.USER) {
             follow = true
-            delay(behavior.userMessageScrollDelay)
             if (latestHasRows) listState.scrollToItem(0)
         }
     }
@@ -139,11 +111,8 @@ internal fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
     LaunchedEffect(state.busy) {
         val streamEnded = wasBusy && !state.busy
         wasBusy = state.busy
-        if (streamEnded) {
-            delay(behavior.streamCompletionScrollDelay)
-            if (latestFollow && latestHasRows && !listState.isScrollInProgress) {
-                listState.scrollToItem(0)
-            }
+        if (streamEnded && latestFollow && latestHasRows && !listState.isScrollInProgress) {
+            listState.scrollToItem(0)
         }
     }
 
@@ -286,15 +255,4 @@ private fun buildChatRows(blocks: List<ChatBlock>, busy: Boolean): List<ChatRow>
             streaming = block.id == liveAssistantId,
         )
     }
-}
-
-private fun streamRevision(blocks: List<ChatBlock>): Long {
-    var revision = blocks.size.toLong()
-    blocks.forEach { block ->
-        revision = revision * 31 + block.id.hashCode()
-        revision = revision * 31 + block.text.length
-        revision = revision * 31 + block.detail.length
-        revision = revision * 31 + block.toolState.ordinal
-    }
-    return revision
 }

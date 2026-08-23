@@ -52,7 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import com.anyaicliremote.app.ui.DefaultChatUiBehaviorConfiguration
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,12 +73,12 @@ import com.mikepenz.markdown.compose.elements.MarkdownTable
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
+import com.mikepenz.markdown.model.markdownAnimations
 import com.mikepenz.markdown.model.rememberMarkdownState
 import com.anyaicliremote.app.model.ChatBlock
 import com.anyaicliremote.app.model.ChatBlockKind
 import com.anyaicliremote.app.model.ToolRunState
 import com.anyaicliremote.app.ui.ChatViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -208,9 +208,9 @@ internal fun AssistantMarkdownFragment(text: String, isStreaming: Boolean) {
         snapshotFlow { latestText }
             .distinctUntilChanged()
             .conflate()
-            .collect { next ->
-                displayedText = next
-                delay(DefaultChatUiBehaviorConfiguration.streamingTextUpdateDelay)
+            .collect { nextText ->
+                withFrameNanos { }
+                displayedText = nextText
             }
     }
     val renderedText = if (isStreaming) displayedText else text
@@ -226,6 +226,7 @@ internal fun AssistantMarkdownFragment(text: String, isStreaming: Boolean) {
             typography = markdownType,
             components = markdownComponents,
             modifier = Modifier.fillMaxWidth(),
+            animations = markdownAnimations(animateTextSize = { this }),
         )
     }
 }

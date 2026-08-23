@@ -231,6 +231,16 @@ libraries. Keep only the smallest compatible dependency or adapter.
 - Compatibility: keep renderer `0.38.1` with the current Kotlin 2.1, Compose, and SDK 35 toolchain.
   Its newer streaming releases require a coordinated Kotlin/Compose/compile-SDK upgrade and are not a
   drop-in change.
+- Verified decision: keep complete Markdown documents and `retainState` in `0.38.1`. For streaming
+  snapshots, use Compose `snapshotFlow` with `conflate`, then commit each displayed frame under
+  `withFrameNanos`. Explicitly use `markdownAnimations(animateTextSize = { this })` to disable the
+  library's default `animateContentSize`, avoiding size animation on every token. With
+  `reverseLayout` `LazyColumn`, index 0 is the visual bottom; use automatic-follow and user-browsing
+  states rather than hard-scrolling every chunk.
+- Upstream check: `StreamingMarkdownState` was inspected in 0.42 and 0.44. Starting with 0.42 it
+  requires Kotlin 2.4 and compileSdk 37, so this project does not perform a major toolchain upgrade.
+- OpenMinis' current tree has no Android client source to copy. Its iOS two-state scrolling architecture
+  is used only as a reference.
 
 ## Android launcher icon
 
@@ -266,7 +276,9 @@ libraries. Keep only the smallest compatible dependency or adapter.
 ## Apple message-list virtualization
 
 - Checked OpenMinis' current iOS `UICollectionView`/diffable/cell-per-block/two-state scroll architecture.
-- OpenMinis is GPLv3, so direct code reuse is incompatible with this MIT repository; it is used only as a behavioral and architectural reference. No source, comments, or custom layout are copied.
+- OpenMinis is GPLv3; this repository's license is not yet selected and the current LICENSE is a
+  placeholder. Until the final license decision, it remains architecture reference only and no source
+  is copied.
 - Decision: use an independent small standard UIKit `UICollectionViewDiffableDataSource` and self-sizing `UIHostingConfiguration` adapter while retaining MIT Microsoft SwiftStreamingMarkdown.
 - Boundary: do not restore full-history `VStack`/`LazyVStack` streaming re-layout, do not write a Markdown parser, and update only cell models for same-ID changes.
 - Static-history reveal is gated by the last Markdown render-ready signal and a 0.30s contentSize

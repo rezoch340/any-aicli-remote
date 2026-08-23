@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -15,6 +16,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -29,9 +33,17 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class ChatEndToEndInstrumentedTest {
+    private companion object {
+        const val STREAM_CHUNK_COUNT = 40
+        const val STREAM_CHUNK_INTERVAL_MILLIS = 50L
+        const val STREAM_TIMEOUT_MILLIS = 20_000L
+        const val STREAM_MARKER = "AUTOSCROLLENDMARKER"
+    }
     @get:Rule val composeRule = createEmptyComposeRule()
 
     private lateinit var fixture: TestDaemonFixture
@@ -134,6 +146,61 @@ class ChatEndToEndInstrumentedTest {
         awaitText("answer = 42", substring = true)
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithContentDescription("停止").fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    @Test
+    fun longStreamFollowsBottomAndCanBeRestoredAfterUserScroll() {
+        val streamStarted = AtomicBoolean(false)
+        val streamCompleted = AtomicBoolean(false)
+        val streamFailure = AtomicReference<Throwable?>(null)
+        var streamThread: Thread? = null
+        fixture.onRequest = { request ->
+            if (request["method"]?.jsonPrimitive?.content == "session/prompt" && streamStarted.compareAndSet(false, true)) {
+                streamThread = Thread {
+                    try {
+                        repeat(STREAM_CHUNK_COUNT) { index ->
+                            val chunkText = "\n\n### Stream chunk ${index + 1}\n\nThis is deliberately long streaming content with enough separate Markdown paragraphs to make each chunk occupy visible vertical space. It keeps arriving while the user browses older content.\n\n"
+                            fixture.sendNotification("session/update", updateJson("agent_message_chunk", chunkText))
+                            Thread.sleep(STREAM_CHUNK_INTERVAL_MILLIS)
+                        }
+                        fixture.sendNotification("session/update", updateJson("agent_message_chunk", STREAM_MARKER))
+                        fixture.sendNotification("session/update", updateJson("turn_completed", ""))
+                        fixture.respondTo(request)
+                        streamCompleted.set(true)
+                    } catch (failure: Throwable) {
+                        streamFailure.set(failure)
+                    }
+                }.also { it.start() }
+            }
+        }
+        try {
+            openFixtureSession()
+            sendChat("long stream")
+            composeRule.waitUntil(STREAM_TIMEOUT_MILLIS) {
+                composeRule.onAllNodesWithText("Stream chunk 15", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("滚动到底部").assertDoesNotExist()
+            composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performTouchInput { swipeDown() }
+            composeRule.waitUntil(STREAM_TIMEOUT_MILLIS) {
+                composeRule.onAllNodesWithContentDescription("滚动到底部").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("滚动到底部").assertIsDisplayed()
+            composeRule.waitUntil(STREAM_TIMEOUT_MILLIS) { streamCompleted.get() }
+            composeRule.onNodeWithContentDescription("滚动到底部").assertIsDisplayed()
+            check(streamFailure.get() == null) { "stream fixture failed" }
+            composeRule.onNodeWithContentDescription("滚动到底部").performClick()
+            composeRule.onNodeWithText(STREAM_MARKER, substring = true).assertIsDisplayed()
+            fixture.messagesBody = historyJson().replace("历史消息", STREAM_MARKER)
+            composeRule.onNodeWithContentDescription("返回").performClick()
+            awaitText("Fixture session", substring = true)
+            composeRule.onNode(hasClickAction() and hasAnyDescendant(hasText("Fixture session", substring = true)), useUnmergedTree = true).performClick()
+            awaitText(STREAM_MARKER, substring = true)
+            composeRule.onNodeWithText(STREAM_MARKER, substring = true).assertIsDisplayed()
+        } finally {
+            streamThread?.join(STREAM_TIMEOUT_MILLIS)
+            check(streamThread?.isAlive != true) { "stream fixture thread did not finish" }
+            check(streamFailure.get() == null) { "stream fixture failed: ${streamFailure.get()}" }
         }
     }
 
@@ -242,8 +309,11 @@ class ChatEndToEndInstrumentedTest {
         fixture.awaitSocket()
         awaitText("Fixture session", substring = true)
         composeRule.onNode(hasClickAction() and hasAnyDescendant(hasText("Fixture session", substring = true)), useUnmergedTree = true).performClick()
-        awaitText("历史消息", substring = true)
         fixture.awaitRequest("session/load")
+        composeRule.onNodeWithContentDescription("返回").assertExists()
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodes(hasSetTextAction(), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     private fun sendChat(text: String) {
