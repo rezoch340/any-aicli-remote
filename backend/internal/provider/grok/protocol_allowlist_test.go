@@ -11,7 +11,7 @@ import (
 
 func TestPrepareClientRequestAllowlist(testContext *testing.T) {
 	workingDirectory := testContext.TempDir()
-	providerInstance := New(Config{SessionsDirectory: filepath.Join(workingDirectory, "sessions")})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: filepath.Join(workingDirectory, "sessions")})
 	allowedMethods := []struct {
 		method             string
 		parameters         map[string]any
@@ -39,7 +39,7 @@ func TestPrepareClientRequestAllowlist(testContext *testing.T) {
 }
 
 func TestPrepareClientRequestRejectsUnlistedMethods(testContext *testing.T) {
-	providerInstance := New(Config{SessionsDirectory: testContext.TempDir()})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: testContext.TempDir()})
 	rejectedMethods := []string{
 		acp.ClientMethodTerminalCreate,
 		acp.ClientMethodFsReadTextFile,

@@ -3,7 +3,9 @@ package skills
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,7 +15,27 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
+const (
+	descriptionEllipsis = "..."
+	unknownSourceOrder  = 9
+)
+
 // Item is the JSON shape exposed by the compatibility /api/skills/list endpoint.
+var MetadataFileTooLargeError = errors.New("skill metadata file exceeds policy limit")
+
+type Policy struct {
+	MaxFileBytes        int64
+	DescriptionMaxRunes int
+	MaxItems            int
+}
+
+func (policy Policy) Validate() error {
+	if policy.MaxFileBytes <= 0 || policy.MaxFileBytes >= math.MaxInt64 || policy.DescriptionMaxRunes <= 0 || policy.MaxItems <= 0 {
+		return errors.New("invalid skills policy")
+	}
+	return nil
+}
+
 type Item struct {
 	Name          string `json:"name"`
 	Description   string `json:"description"`
@@ -75,12 +97,15 @@ func hasSkippedPart(path string) bool {
 	return false
 }
 
-func shortDescription(value string) string {
-	if len([]rune(value)) <= 240 {
+func shortDescription(value string, maximum int) string {
+	runes := []rune(value)
+	if len(runes) <= maximum {
 		return value
 	}
-	runes := []rune(value)
-	return string(runes[:237]) + "..."
+	if maximum <= len(descriptionEllipsis) {
+		return string(runes[:maximum])
+	}
+	return string(runes[:maximum-len(descriptionEllipsis)]) + descriptionEllipsis
 }
 
 func invocable(metadata Frontmatter) bool {
@@ -129,7 +154,7 @@ func canonicalRoots(configuredRoots []providerapi.SkillRoot) []scanRoot {
 	return roots
 }
 
-func readRegularFile(path string) ([]byte, error) {
+func readRegularFile(path string, maximum int64) ([]byte, error) {
 	pathInfo, operationError := os.Lstat(path)
 	if operationError != nil {
 		return nil, operationError
@@ -153,7 +178,14 @@ func readRegularFile(path string) ([]byte, error) {
 	if currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.Mode().IsRegular() || !os.SameFile(pathInfo, openedInfo) || !os.SameFile(openedInfo, currentInfo) {
 		return nil, errors.New("metadata path changed during open")
 	}
-	return io.ReadAll(file)
+	data, operationError := io.ReadAll(io.LimitReader(file, maximum+1))
+	if operationError != nil {
+		return nil, operationError
+	}
+	if int64(len(data)) > maximum {
+		return nil, fmt.Errorf("%w: %s", MetadataFileTooLargeError, path)
+	}
+	return data, nil
 }
 
 func metadataCandidate(root scanRoot, directoryEntry os.DirEntry) bool {
@@ -165,8 +197,8 @@ func metadataCandidate(root scanRoot, directoryEntry os.DirEntry) bool {
 		lowerName != "changelog.md" && lowerName != "license.md"
 }
 
-func readItem(root scanRoot, path string) (Item, bool) {
-	raw, operationError := readRegularFile(path)
+func readItem(root scanRoot, path string, policy Policy) (Item, bool) {
+	raw, operationError := readRegularFile(path, policy.MaxFileBytes)
 	if operationError != nil {
 		return Item{}, false
 	}
@@ -188,7 +220,7 @@ func readItem(root scanRoot, path string) (Item, bool) {
 	}
 	item := Item{
 		Name:          name,
-		Description:   shortDescription(metadata.Description),
+		Description:   shortDescription(metadata.Description, policy.DescriptionMaxRunes),
 		Hint:          metadata.Hint,
 		Source:        string(root.source),
 		Path:          path,
@@ -205,11 +237,20 @@ func readItem(root scanRoot, path string) (Item, bool) {
 
 // Scan returns discovered skills and slash commands from provider-supplied
 // roots, de-duplicated case-insensitively.
-func Scan(configuredRoots []providerapi.SkillRoot) ([]Item, error) {
+func Scan(configuredRoots []providerapi.SkillRoot, policy Policy) ([]Item, error) {
+	if operationError := policy.Validate(); operationError != nil {
+		return nil, operationError
+	}
 	seen := map[string]bool{}
 	items := []Item{}
 	for _, root := range canonicalRoots(configuredRoots) {
+		if len(items) >= policy.MaxItems {
+			break
+		}
 		_ = filepath.WalkDir(root.canonicalPath, func(path string, directoryEntry os.DirEntry, operationError error) error {
+			if len(items) >= policy.MaxItems {
+				return filepath.SkipDir
+			}
 			if operationError != nil {
 				return nil
 			}
@@ -222,7 +263,7 @@ func Scan(configuredRoots []providerapi.SkillRoot) ([]Item, error) {
 			if !metadataCandidate(root, directoryEntry) || hasSkippedPart(path) {
 				return nil
 			}
-			item, valid := readItem(root, path)
+			item, valid := readItem(root, path, policy)
 			if !valid {
 				return nil
 			}
@@ -240,11 +281,11 @@ func Scan(configuredRoots []providerapi.SkillRoot) ([]Item, error) {
 	sort.Slice(items, func(leftIndex, rightIndex int) bool {
 		leftOrder, valid := order[items[leftIndex].Source]
 		if !valid {
-			leftOrder = 9
+			leftOrder = unknownSourceOrder
 		}
 		rightOrder, valid := order[items[rightIndex].Source]
 		if !valid {
-			rightOrder = 9
+			rightOrder = unknownSourceOrder
 		}
 		if leftOrder != rightOrder {
 			return leftOrder < rightOrder

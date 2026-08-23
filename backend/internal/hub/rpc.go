@@ -12,9 +12,6 @@ import (
 )
 
 const (
-	defaultPendingRequestLimit        = 256
-	defaultPendingClientRequestLimit  = 32
-	defaultPendingRequestTimeout      = 30 * time.Minute
 	agentUnavailableErrorCode         = -32001
 	requestLimitErrorCode             = -32002
 	providerReverseOperationErrorCode = -32000
@@ -210,9 +207,9 @@ func (hubInstance *Hub) handleClientMessage(client *clientConnection, raw []byte
 		}
 	}
 	if hasID && method != "" {
-		timeout := 5 * time.Second
+		timeout := hubInstance.policy.NormalEnsure
 		if prepared.Patient {
-			timeout = 18 * time.Second
+			timeout = hubInstance.policy.PatientEnsure
 		}
 		operationContext, cancel := context.WithTimeout(context.Background(), timeout)
 		operationError := hubInstance.Ensure(operationContext)
@@ -299,9 +296,6 @@ func (hubInstance *Hub) removePendingLocked(identifier int64) (pendingRequest, b
 
 func (hubInstance *Hub) armPendingTimeout(identifier int64) {
 	timeout := hubInstance.pendingTimeout
-	if timeout <= 0 {
-		timeout = defaultPendingRequestTimeout
-	}
 	timeoutContext, timeoutCancel := context.WithCancel(hubInstance.lifetimeContext)
 	hubInstance.stateMutex.Lock()
 	pending, present := hubInstance.pending[identifier]
@@ -357,9 +351,9 @@ func (hubInstance *Hub) rejectReverseClientRequest(method string, params map[str
 }
 
 func (hubInstance *Hub) ensureAndSend(raw []byte, patient bool) error {
-	timeout := 3 * time.Second
+	timeout := hubInstance.policy.NotificationEnsure
 	if patient {
-		timeout = 18 * time.Second
+		timeout = hubInstance.policy.PatientEnsure
 	}
 	operationContext, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

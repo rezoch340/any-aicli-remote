@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	APIKeyMissingError = errors.New("provider voice API key not configured — browser fallback only")
-	TextRequiredError  = errors.New("text required")
+	APIKeyMissingError    = errors.New("provider voice API key not configured — browser fallback only")
+	TextRequiredError     = errors.New("text required")
+	ResponseTooLargeError = errors.New("voice response body too large")
 )
 
 // Service is implemented by a provider adapter when it offers speech synthesis.

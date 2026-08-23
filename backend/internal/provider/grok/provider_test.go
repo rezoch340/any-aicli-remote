@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,7 @@ func TestProviderScansActiveAndArchivedWithDeterministicPrecedence(testContext *
 	activePath := writeSummary(testContext, activeRoot, "project", "duplicate", activeWorkspace, "active wins", "2026-01-02T00:00:00Z")
 	writeSummary(testContext, archivedRoot, "project", "archived-only", archivedWorkspace, "archived", "2026-07-01T00:00:00Z")
 
-	providerInstance := New(Config{SessionsDirectory: activeRoot})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot})
 	sessions, operationError := providerInstance.ScanSessions(context.Background())
 	if operationError != nil {
 		testContext.Fatal(operationError)
@@ -73,7 +74,7 @@ func TestLoadMessagesExtractsContentAndExcludesReasoning(testContext *testing.T)
 	if operationError := os.WriteFile(filepath.Join(filepath.Dir(summaryPath), "chat_history.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	providerInstance := New(Config{SessionsDirectory: activeRoot})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot})
 	messages, operationError := providerInstance.LoadMessages(context.Background(), "message-session")
 	if operationError != nil {
 		testContext.Fatal(operationError)
@@ -84,7 +85,7 @@ func TestLoadMessagesExtractsContentAndExcludesReasoning(testContext *testing.T)
 }
 
 func TestProtocolDefersExistingSessionWorkspaceResolutionAndRequiresNewSessionWorkspace(testContext *testing.T) {
-	providerInstance := New(Config{SessionsDirectory: filepath.Join(testContext.TempDir(), "sessions")})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: filepath.Join(testContext.TempDir(), "sessions")})
 	firstParameters := map[string]any{"sessionId": "first-session", "mcpServers": []any{}}
 	firstRequest, operationError := providerInstance.PrepareClientRequest(context.Background(), acp.AgentMethodSessionLoad, firstParameters)
 	if operationError != nil || firstRequest.SessionID != "first-session" || !firstRequest.RequiresSession || !firstRequest.RestoresSession || firstRequest.WorkingDirectory != "" || firstParameters["cwd"] != nil {
@@ -102,7 +103,7 @@ func TestProtocolDefersExistingSessionWorkspaceResolutionAndRequiresNewSessionWo
 }
 
 func TestEffortRequestUsesSelectedModelWithoutHardcodedFallback(testContext *testing.T) {
-	providerInstance := New(Config{SessionsDirectory: filepath.Join(testContext.TempDir(), "sessions")})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: filepath.Join(testContext.TempDir(), "sessions")})
 	_, selectedParameters := providerInstance.EffortRequest("session", "grok-current", "high")
 	if selectedParameters["modelId"] != "grok-current" {
 		testContext.Fatalf("selected model = %#v", selectedParameters["modelId"])
@@ -118,7 +119,7 @@ func TestAgentCommandKeepsTransportSecretOutOfProcessArguments(testContext *test
 	if operationError := os.WriteFile(executablePath, []byte("#!/bin/sh\n"), 0o700); operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	providerInstance := New(Config{ExecutablePath: executablePath, AlwaysApprove: true})
+	providerInstance := mustNew(testContext, Config{ExecutablePath: executablePath, AlwaysApprove: true})
 	transportSecret := "provider-transport-secret"
 	command, operationError := providerInstance.AgentCommand(providerapi.AgentLaunchConfiguration{
 		Host: "127.0.0.1", Port: 2419, Secret: transportSecret,
@@ -143,7 +144,7 @@ func TestResolveSessionRejectsMismatchedSummaryIdentity(testContext *testing.T) 
 	if operationError := os.WriteFile(path, []byte(updated), 0o644); operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	providerInstance := New(Config{SessionsDirectory: activeRoot})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot})
 	sessions, operationError := providerInstance.ScanSessions(context.Background())
 	if operationError != nil {
 		testContext.Fatal(operationError)
@@ -189,7 +190,7 @@ func TestSessionFilesRejectSiblingSymlinkEscape(testContext *testing.T) {
 		}
 	}
 
-	providerInstance := New(Config{SessionsDirectory: activeRoot})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot})
 	if _, operationError := providerInstance.LoadMessages(context.Background(), "first-session"); operationError == nil {
 		testContext.Fatal("chat history escaped through sibling symlink")
 	}
@@ -221,7 +222,7 @@ func TestRenameRejectsSymlinkedSummaryWithoutChangingSibling(testContext *testin
 		testContext.Fatal(operationError)
 	}
 
-	providerInstance := New(Config{SessionsDirectory: activeRoot})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot})
 	if _, operationError := providerInstance.RenameSession(context.Background(), "first-session", "escaped"); operationError == nil {
 		testContext.Fatal("rename followed a sibling summary symlink")
 	}
@@ -251,7 +252,7 @@ func TestRenameWritesSummaryThroughSessionRoot(testContext *testing.T) {
 	if operationError := os.Symlink(relativeVictim, preplacedTemporary); operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	providerInstance := New(Config{SessionsDirectory: activeRoot})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot})
 	result, operationError := providerInstance.RenameSession(context.Background(), "rename-session", "after")
 	if operationError != nil {
 		testContext.Fatal(operationError)
@@ -285,4 +286,124 @@ func TestRenameWritesSummaryThroughSessionRoot(testContext *testing.T) {
 	if operationError != nil || len(generatedTemporary) != 0 {
 		testContext.Fatalf("generated temporary rename files remain: %#v, %v", generatedTemporary, operationError)
 	}
+}
+
+func testHistoryPolicy() providerapi.HistoryPolicy {
+	return providerapi.HistoryPolicy{DefaultLimit: 100, LiveLimit: 400, MinLimit: 20, MaxLimit: 4000, DefaultMaxBytes: 400000, LiveMaxBytes: 512000, BeforeMaxBytes: 1200000, MinMaxBytes: 64000, MaxMaxBytes: 12000000, AdapterEventLimit: 1600, AdapterReadBytes: 8000000, TitleBatchLimit: 250, ChatTextMaxRunes: 120000, MessageScanInitialBytes: 64 * 1024, MessageScanMaxBytes: 8 * 1024 * 1024, MetadataTitleMaxRunes: 80, MetadataSummaryMaxRunes: 160, RenameTitleMaxRunes: 160}
+}
+func mustNew(testContext *testing.T, configuration Config) *GrokProvider {
+	testContext.Helper()
+	if configuration.HistoryPolicy == (providerapi.HistoryPolicy{}) {
+		configuration.HistoryPolicy = testHistoryPolicy()
+	}
+	providerInstance, operationError := New(configuration)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	return providerInstance
+}
+
+func TestHistoryUsesInjectedAdapterPolicy(testContext *testing.T) {
+	activeRoot := filepath.Join(testContext.TempDir(), "sessions")
+	summaryPath := writeSummary(testContext, activeRoot, "project", "one", testContext.TempDir(), "one", "2026-01-02T00:00:00Z")
+	updates := `{"method":"session/update","params":{"sessionId":"one","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"first"}}}}` + "\n" + `{"method":"session/update","params":{"sessionId":"one","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"second"}}}}` + "\n"
+	if operationError := os.WriteFile(filepath.Join(filepath.Dir(summaryPath), "updates.jsonl"), []byte(updates), 0o644); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	policy := testHistoryPolicy()
+	policy.AdapterEventLimit = 1
+	policy.AdapterReadBytes = 500
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot, HistoryPolicy: policy})
+	page, operationError := providerInstance.ReadHistory(context.Background(), providerapi.HistoryQuery{SessionID: "one"})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if len(page.Events) != 1 || eventContent(page.Events[0]) != "second" || page.Metadata["window_start"].(int64) <= 0 {
+		testContext.Fatalf("events=%#v meta=%#v", page.Events, page.Metadata)
+	}
+}
+
+func eventContent(event providerapi.Event) string {
+	params, _ := event["params"].(map[string]any)
+	update, _ := params["update"].(map[string]any)
+	content, _ := update["content"].(map[string]any)
+	value, _ := content["text"].(string)
+	return value
+}
+
+func TestHistoryPolicyControlsMessageScannerAndSummaryRunes(testContext *testing.T) {
+	root := filepath.Join(testContext.TempDir(), "sessions")
+	path := writeSummary(testContext, root, "project", "limited", testContext.TempDir(), "标题甲乙丙丁", "2026-01-02T00:00:00Z")
+	policy := testHistoryPolicy()
+	policy.MessageScanInitialBytes, policy.MessageScanMaxBytes = 8, 32
+	policy.MetadataTitleMaxRunes, policy.MetadataSummaryMaxRunes = 3, 4
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: root, HistoryPolicy: policy})
+	metadata, errorValue := providerInstance.parseSummary(path)
+	if errorValue != nil || metadata.Title != "标题甲..." || metadata.Summary != "标题甲乙..." {
+		testContext.Fatalf("metadata=%#v err=%v", metadata, errorValue)
+	}
+	if errorValue = os.WriteFile(filepath.Join(filepath.Dir(path), "chat_history.jsonl"), []byte(`{"type":"user","content":[{"type":"input_text","input_text":"`+strings.Repeat("x", 100)+`"}]}`+"\n"), 0o644); errorValue != nil {
+		testContext.Fatal(errorValue)
+	}
+	if _, errorValue = providerInstance.LoadMessages(context.Background(), "limited"); errorValue == nil {
+		testContext.Fatal("oversized line accepted")
+	}
+	policy.MessageScanMaxBytes = 512
+	providerInstance = mustNew(testContext, Config{SessionsDirectory: root, HistoryPolicy: policy})
+	if messages, errorValue := providerInstance.LoadMessages(context.Background(), "limited"); errorValue != nil || len(messages) != 1 {
+		testContext.Fatalf("messages=%#v err=%v", messages, errorValue)
+	}
+}
+
+func TestOversizeSummaryUsesMetadataLimit(testContext *testing.T) {
+	activeRoot := filepath.Join(testContext.TempDir(), "sessions")
+	summaryPath := writeSummary(testContext, activeRoot, "project", "oversize-summary", testContext.TempDir(), "title", "2026-01-02T00:00:00Z")
+	if operationError := os.WriteFile(summaryPath, append(mustReadFile(testContext, summaryPath), []byte(`,"padding":"0123456789"}`)...), 0o644); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	policy := testHistoryPolicy()
+	policy.AdapterReadBytes = 128
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot, HistoryPolicy: policy})
+	_, operationError := providerInstance.openSessionSource("", summaryPath)
+	if !errors.Is(operationError, MetadataFileTooLargeError) {
+		testContext.Fatalf("summary error = %v", operationError)
+	}
+}
+
+func TestSignalsMetadataLimitAndNormalRead(testContext *testing.T) {
+	activeRoot := filepath.Join(testContext.TempDir(), "sessions")
+	summaryPath := writeSummary(testContext, activeRoot, "project", "signals-session", testContext.TempDir(), "title", "2026-01-02T00:00:00Z")
+	signalsPath := filepath.Join(filepath.Dir(summaryPath), "signals.json")
+	policy := testHistoryPolicy()
+	policy.AdapterReadBytes = 512
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: activeRoot, HistoryPolicy: policy})
+	if operationError := os.WriteFile(signalsPath, []byte(`{"ok":true}`), 0o644); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if signals, operationError := providerInstance.ReadSignals(context.Background(), "signals-session"); operationError != nil || signals["ok"] != true {
+		testContext.Fatalf("normal signals = %#v, %v", signals, operationError)
+	}
+	if operationError := os.WriteFile(signalsPath, []byte(`{"padding":"`+strings.Repeat("x", 600)+`"}`), 0o644); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if _, operationError := providerInstance.ReadSignals(context.Background(), "signals-session"); !errors.Is(operationError, MetadataFileTooLargeError) {
+		testContext.Fatalf("oversize signals error = %v", operationError)
+	}
+}
+
+func TestHistoryPolicyRejectsAdapterReadOverflow(testContext *testing.T) {
+	policy := testHistoryPolicy()
+	policy.AdapterReadBytes = math.MaxInt64
+	if operationError := policy.Validate(); operationError == nil {
+		testContext.Fatal("MaxInt64 AdapterReadBytes accepted")
+	}
+}
+
+func mustReadFile(testContext *testing.T, path string) []byte {
+	testContext.Helper()
+	data, operationError := os.ReadFile(path)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	return data
 }

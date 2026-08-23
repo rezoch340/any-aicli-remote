@@ -10,47 +10,56 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/rezoch340/any-aicli-remote/backend/internal/voice"
 )
 
 const DefaultVoiceEndpoint = "https://api.x.ai/v1/tts"
+const (
+	defaultVoiceID    = "eve"
+	defaultLanguage   = "en"
+	defaultCodec      = "mp3"
+	defaultSampleRate = 24_000
+	defaultBitRate    = 128_000
+	minimumSpeed      = 0.7
+	maximumSpeed      = 1.5
+	audioMPEG         = "audio/mpeg"
+)
 
-var VoiceIdentifiers = []string{"eve", "ara", "leo", "rex", "sal", "luna", "orion", "helix"}
+var voiceIdentifiers = []string{"eve", "ara", "leo", "rex", "sal", "luna", "orion", "helix"}
 
 type VoiceService struct {
 	apiKey   string
 	endpoint string
 	client   *http.Client
+	policy   voice.Policy
 }
 
-func NewVoice(apiKey string) *VoiceService {
-	return NewVoiceWithClient(apiKey, DefaultVoiceEndpoint, &http.Client{Timeout: 60 * time.Second})
+func NewVoice(apiKey string, policy voice.Policy) (*VoiceService, error) {
+	return NewVoiceWithClient(apiKey, DefaultVoiceEndpoint, nil, policy)
 }
-
-func NewVoiceFromEnvironment() *VoiceService {
-	return NewVoice(DiscoverVoiceAPIKey(""))
+func NewVoiceFromEnvironment(policy voice.Policy) (*VoiceService, error) {
+	return NewVoice(DiscoverVoiceAPIKey(""), policy)
 }
-
-func NewVoiceWithClient(apiKey, endpoint string, client *http.Client) *VoiceService {
+func NewVoiceWithClient(apiKey, endpoint string, client *http.Client, policy voice.Policy) (*VoiceService, error) {
+	if errorValue := policy.Validate(); errorValue != nil {
+		return nil, errorValue
+	}
 	if strings.TrimSpace(endpoint) == "" {
 		endpoint = DefaultVoiceEndpoint
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+		client = &http.Client{}
+	} else {
+		cloned := *client
+		client = &cloned
 	}
-	return &VoiceService{apiKey: strings.TrimSpace(apiKey), endpoint: endpoint, client: client}
+	client.Timeout = policy.RequestTimeout
+	return &VoiceService{apiKey: strings.TrimSpace(apiKey), endpoint: endpoint, client: client, policy: policy}, nil
 }
-
 func (service *VoiceService) Status() voice.StatusResult {
 	hasKey := strings.TrimSpace(service.apiKey) != ""
-	status := voice.StatusResult{
-		OK:     true,
-		TTS:    hasKey,
-		STT:    "browser",
-		Voices: append([]string(nil), VoiceIdentifiers...),
-	}
+	status := voice.StatusResult{OK: true, TTS: hasKey, STT: "browser", Voices: append([]string(nil), voiceIdentifiers...)}
 	if hasKey {
 		status.Provider = "xai"
 		return status
@@ -60,7 +69,6 @@ func (service *VoiceService) Status() voice.StatusResult {
 	status.Hint = &hint
 	return status
 }
-
 func (service *VoiceService) Synthesize(operationContext context.Context, input voice.Request) (voice.Audio, error) {
 	if strings.TrimSpace(service.apiKey) == "" {
 		return voice.Audio{}, voice.APIKeyMissingError
@@ -72,65 +80,65 @@ func (service *VoiceService) Synthesize(operationContext context.Context, input 
 	if text == "" {
 		return voice.Audio{}, voice.TextRequiredError
 	}
-	if runes := []rune(text); len(runes) > 15_000 {
-		text = string(runes[:14_990]) + "…"
+	runes := []rune(text)
+	if len(runes) > service.policy.TextMaxRunes {
+		text = string(runes[:service.policy.TruncatedTextRunes]) + "…"
 	}
 	voiceID := strings.TrimSpace(input.VoiceID)
 	if voiceID == "" {
 		voiceID = strings.TrimSpace(input.Voice)
 	}
 	if voiceID == "" {
-		voiceID = "eve"
+		voiceID = defaultVoiceID
 	}
 	language := strings.TrimSpace(input.Language)
 	if language == "" {
-		language = "en"
+		language = defaultLanguage
 	}
-	payload := voicePayload{
-		Text:              text,
-		VoiceID:           voiceID,
-		Language:          language,
-		OutputFormat:      voiceOutputFormat{Codec: "mp3", SampleRate: 24_000, BitRate: 128_000},
-		TextNormalization: true,
-	}
+	payload := voicePayload{Text: text, VoiceID: voiceID, Language: language, OutputFormat: voiceOutputFormat{Codec: defaultCodec, SampleRate: defaultSampleRate, BitRate: defaultBitRate}, TextNormalization: true}
 	if input.Speed != nil && !math.IsNaN(*input.Speed) && !math.IsInf(*input.Speed, 0) {
-		speed := max(0.7, min(1.5, *input.Speed))
+		speed := max(minimumSpeed, min(maximumSpeed, *input.Speed))
 		payload.Speed = &speed
 	}
-	body, operationError := json.Marshal(payload)
-	if operationError != nil {
-		return voice.Audio{}, operationError
+	body, errorValue := json.Marshal(payload)
+	if errorValue != nil {
+		return voice.Audio{}, errorValue
 	}
-	request, operationError := http.NewRequestWithContext(operationContext, http.MethodPost, service.endpoint, bytes.NewReader(body))
-	if operationError != nil {
-		return voice.Audio{}, operationError
+	request, errorValue := http.NewRequestWithContext(operationContext, http.MethodPost, service.endpoint, bytes.NewReader(body))
+	if errorValue != nil {
+		return voice.Audio{}, errorValue
 	}
 	request.Header.Set("Authorization", "Bearer "+service.apiKey)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "audio/mpeg")
-	response, operationError := service.client.Do(request)
-	if operationError != nil {
-		return voice.Audio{}, operationError
+	request.Header.Set("Accept", audioMPEG)
+	response, errorValue := service.client.Do(request)
+	if errorValue != nil {
+		return voice.Audio{}, errorValue
 	}
 	defer response.Body.Close()
-	data, operationError := io.ReadAll(response.Body)
-	if operationError != nil {
-		return voice.Audio{}, operationError
+	limit := service.policy.SuccessBodyMaxBytes
+	if response.StatusCode != http.StatusOK {
+		limit = service.policy.ErrorBodyMaxBytes
+	}
+	data, errorValue := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if errorValue != nil {
+		return voice.Audio{}, errorValue
+	}
+	if int64(len(data)) > limit {
+		if response.StatusCode == http.StatusOK {
+			return voice.Audio{}, voice.ResponseTooLargeError
+		}
+		data = data[:limit]
 	}
 	if response.StatusCode != http.StatusOK {
-		return voice.Audio{}, &voice.UpstreamError{
-			Status: response.StatusCode,
-			Body:   truncateVoiceText(strings.ToValidUTF8(string(data), "�"), 400),
-		}
+		return voice.Audio{}, &voice.UpstreamError{Status: response.StatusCode, Body: truncateVoiceText(strings.ToValidUTF8(string(data), "�"), service.policy.ErrorBodyMaxRunes)}
 	}
 	contentType := strings.TrimSpace(response.Header.Get("Content-Type"))
 	if contentType == "" {
-		contentType = "audio/mpeg"
+		contentType = audioMPEG
 	}
 	return voice.Audio{Data: data, ContentType: contentType, VoiceID: voiceID}, nil
 }
-
-// DiscoverVoiceAPIKey reads credentials owned by the Grok provider adapter.
 func DiscoverVoiceAPIKey(homeDirectory string) string {
 	for _, key := range []string{"XAI_API_KEY", "GROK_API_KEY", "xai_api_key"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
@@ -138,14 +146,14 @@ func DiscoverVoiceAPIKey(homeDirectory string) string {
 		}
 	}
 	if strings.TrimSpace(homeDirectory) == "" {
-		resolvedHome, operationError := os.UserHomeDir()
-		if operationError != nil {
+		resolvedHome, errorValue := os.UserHomeDir()
+		if errorValue != nil {
 			return ""
 		}
 		homeDirectory = resolvedHome
 	}
-	data, operationError := os.ReadFile(filepath.Join(homeDirectory, ".grok", "credentials.json"))
-	if operationError != nil {
+	data, errorValue := os.ReadFile(filepath.Join(homeDirectory, ".grok", "credentials.json"))
+	if errorValue != nil {
 		return ""
 	}
 	var credentials map[string]any
@@ -167,7 +175,6 @@ type voiceOutputFormat struct {
 	SampleRate int    `json:"sample_rate"`
 	BitRate    int    `json:"bit_rate"`
 }
-
 type voicePayload struct {
 	Text              string            `json:"text"`
 	VoiceID           string            `json:"voice_id"`

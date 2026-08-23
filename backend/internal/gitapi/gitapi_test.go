@@ -6,11 +6,33 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezoch340/any-aicli-remote/backend/internal/fsapi"
 )
+
+var testGitPolicy = Policy{CommandTimeout: time.Second, DiffTimeout: time.Second, DirtyFileLimit: 80, DiffRuneLimit: 200000, LogDefaultLimit: 12, LogMaxLimit: 30, ContextFileReadBytes: 16000, ContextPreviewRunes: 4000, CommandOutputMaxBytes: 16 << 20}
+
+func mustNewWithGit(testContext *testing.T, workspace func() string, gitPath string) *Service {
+	testContext.Helper()
+	service, operationError := NewWithGit(workspace, gitPath, testGitPolicy)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	return service
+}
+
+func mustNewWithPinnedGit(testContext *testing.T, identity *fsapi.RootIdentity, gitPath string) *Service {
+	testContext.Helper()
+	service, operationError := NewWithPinnedGit(identity, gitPath, testGitPolicy)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	return service
+}
 
 func TestGitStatusDiffLogAndProject(testContext *testing.T) {
 	git, operationError := exec.LookPath("git")
@@ -27,7 +49,7 @@ func TestGitStatusDiffLogAndProject(testContext *testing.T) {
 	writeFile(testContext, filepath.Join(root, "README.md"), "# Project\nchanged\n")
 	writeFile(testContext, filepath.Join(root, "new.txt"), "new\n")
 
-	service := NewWithGit(func() string { return root }, git)
+	service := mustNewWithGit(testContext, func() string { return root }, git)
 	operationContext := context.Background()
 	status, operationError := service.Status(operationContext)
 	if operationError != nil {
@@ -81,7 +103,7 @@ func TestStatusOutsideGitRepository(testContext *testing.T) {
 		testContext.Skip("git not installed")
 	}
 	root := testContext.TempDir()
-	status, operationError := NewWithGit(func() string { return root }, git).Status(context.Background())
+	status, operationError := mustNewWithGit(testContext, func() string { return root }, git).Status(context.Background())
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -92,7 +114,7 @@ func TestStatusOutsideGitRepository(testContext *testing.T) {
 
 func TestGitPathAndWorkspaceValidation(testContext *testing.T) {
 	root := testContext.TempDir()
-	service := NewWithGit(func() string { return root }, "/missing/git")
+	service := mustNewWithGit(testContext, func() string { return root }, "/missing/git")
 	if _, operationError := service.Status(context.Background()); operationError == nil {
 		testContext.Fatal("missing git executable succeeded")
 	}
@@ -102,7 +124,7 @@ func TestGitPathAndWorkspaceValidation(testContext *testing.T) {
 	if _, operationError := service.Diff(context.Background(), filepath.Join(testContext.TempDir(), "outside"), false); !errors.Is(operationError, PathOutsideWorkspaceError) {
 		testContext.Fatalf("absolute outside diff error = %v", operationError)
 	}
-	if _, operationError := NewWithGit(nil, "git").Status(context.Background()); !errors.Is(operationError, WorkspaceUnavailableError) {
+	if _, operationError := mustNewWithGit(testContext, nil, "git").Status(context.Background()); !errors.Is(operationError, WorkspaceUnavailableError) {
 		testContext.Fatalf("nil workspace error = %v", operationError)
 	}
 }
@@ -118,7 +140,7 @@ func TestProjectSkipsEscapingSymlink(testContext *testing.T) {
 	if operationError := os.Symlink(outside, filepath.Join(root, "AGENTS.md")); operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	project, operationError := NewWithGit(func() string { return root }, git).Project(context.Background())
+	project, operationError := mustNewWithGit(testContext, func() string { return root }, git).Project(context.Background())
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -143,7 +165,7 @@ func TestPinnedGitWorkspaceRejectsReplacement(testContext *testing.T) {
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	service := NewWithPinnedGit(rootIdentity, gitPath)
+	service := mustNewWithPinnedGit(testContext, rootIdentity, gitPath)
 	if operationError := os.Rename(workspacePath, originalPath); operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -184,5 +206,122 @@ func writeFile(testContext *testing.T, path, content string) {
 	testContext.Helper()
 	if operationError := os.WriteFile(path, []byte(content), 0o644); operationError != nil {
 		testContext.Fatal(operationError)
+	}
+}
+
+func TestCustomPolicyEnforcesGitLimits(testContext *testing.T) {
+	gitPath, operationError := exec.LookPath("git")
+	if operationError != nil {
+		testContext.Skip("git not installed")
+	}
+	root := testContext.TempDir()
+	runGit(testContext, gitPath, root, "init", "-q")
+	runGit(testContext, gitPath, root, "config", "user.email", "test@example.com")
+	runGit(testContext, gitPath, root, "config", "user.name", "Test")
+	for index := 0; index < 3; index++ {
+		writeFile(testContext, filepath.Join(root, "README.md"), strings.Repeat("a", index+1))
+		runGit(testContext, gitPath, root, "add", "README.md")
+		runGit(testContext, gitPath, root, "commit", "-q", "-m", "commit")
+	}
+	writeFile(testContext, filepath.Join(root, "README.md"), strings.Repeat("change\n", 20))
+	writeFile(testContext, filepath.Join(root, "other.txt"), "dirty")
+	writeFile(testContext, filepath.Join(root, "package.json"), strings.Repeat("x", 9))
+	policy := testGitPolicy
+	policy.DirtyFileLimit, policy.DiffRuneLimit = 1, 12
+	policy.LogDefaultLimit, policy.LogMaxLimit = 1, 2
+	policy.ContextFileReadBytes, policy.ContextPreviewRunes = 8, 3
+	service := mustNewWithGitPolicy(testContext, func() string { return root }, gitPath, policy)
+	status, operationError := service.Status(context.Background())
+	if operationError != nil || len(status.Files) != 1 {
+		testContext.Fatalf("dirty cap = %#v, %v", status, operationError)
+	}
+	diff, operationError := service.Diff(context.Background(), "README.md", false)
+	if operationError != nil || len([]rune(diff.Diff)) > policy.DiffRuneLimit {
+		testContext.Fatalf("diff cap = %#v, %v", diff, operationError)
+	}
+	defaultLog, operationError := service.Log(context.Background(), 0)
+	if operationError != nil || len(defaultLog.Commits) != 1 {
+		testContext.Fatalf("default log cap = %#v, %v", defaultLog, operationError)
+	}
+	maximumLog, operationError := service.Log(context.Background(), 99)
+	if operationError != nil || len(maximumLog.Commits) != 2 {
+		testContext.Fatalf("maximum log cap = %#v, %v", maximumLog, operationError)
+	}
+	project, operationError := service.Project(context.Background())
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	for _, file := range project.Files {
+		if file.Name == "package.json" {
+			testContext.Fatal("oversized context file leaked")
+		}
+	}
+	writeFile(testContext, filepath.Join(root, "README.md"), "abcdef")
+	policy.ContextFileReadBytes, policy.ContextPreviewRunes = 8, 3
+	project, operationError = mustNewWithGitPolicy(testContext, func() string { return root }, gitPath, policy).Project(context.Background())
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	for _, file := range project.Files {
+		if file.Name == "README.md" && file.Preview != "abc" {
+			testContext.Fatalf("preview cap = %#v", file)
+		}
+	}
+}
+
+func TestGitPolicyRejectsInvalidAndTimesOut(testContext *testing.T) {
+	if _, operationError := NewWithGit(func() string { return testContext.TempDir() }, "git", Policy{}); operationError == nil {
+		testContext.Fatal("zero policy accepted")
+	}
+	if _, operationError := NewWithGit(func() string { return testContext.TempDir() }, "git", Policy{CommandTimeout: time.Second, DiffTimeout: time.Second, DirtyFileLimit: 1, DiffRuneLimit: 1, LogDefaultLimit: 2, LogMaxLimit: 1, ContextFileReadBytes: 1, ContextPreviewRunes: 1, CommandOutputMaxBytes: 1}); operationError == nil {
+		testContext.Fatal("invalid policy accepted")
+	}
+	if runtime.GOOS == "windows" {
+		testContext.Skip("shell fixture is Unix-only")
+	}
+	root := testContext.TempDir()
+	scriptPath := filepath.Join(root, "slow-git")
+	writeFile(testContext, scriptPath, "#!/bin/sh\nsleep 1\n")
+	if operationError := os.Chmod(scriptPath, 0o755); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	policy := testGitPolicy
+	policy.CommandTimeout = 20 * time.Millisecond
+	service := mustNewWithGitPolicy(testContext, func() string { return root }, scriptPath, policy)
+	if _, operationError := service.Status(context.Background()); !errors.Is(operationError, context.DeadlineExceeded) {
+		testContext.Fatalf("timeout error = %v", operationError)
+	}
+}
+
+func mustNewWithGitPolicy(testContext *testing.T, workspace func() string, gitPath string, policy Policy) *Service {
+	testContext.Helper()
+	service, operationError := NewWithGit(workspace, gitPath, policy)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	return service
+}
+
+func TestCommandOutputIsBounded(testContext *testing.T) {
+	if runtime.GOOS == "windows" {
+		testContext.Skip("shell fixture is Unix-only")
+	}
+	root := testContext.TempDir()
+	scriptPath := filepath.Join(root, "fake-git")
+	writeFile(testContext, scriptPath, "#!/bin/sh\nprintf '0123456789abcdef'\n")
+	if operationError := os.Chmod(scriptPath, 0o755); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	policy := testGitPolicy
+	policy.CommandOutputMaxBytes = 5
+	policy.CommandTimeout = 3 * time.Second
+	service := mustNewWithGitPolicy(testContext, func() string { return root }, scriptPath, policy)
+	result, operationError := service.run(context.Background(), policy.CommandTimeout, root, "diff")
+	if operationError != nil || result.stdout != "01234" {
+		testContext.Fatalf("bounded command result = %#v, %v", result, operationError)
+	}
+	diff, operationError := service.Diff(context.Background(), "", false)
+	if operationError != nil || len(diff.Diff) > int(policy.CommandOutputMaxBytes) || diff.Diff != "01234" {
+		testContext.Fatalf("bounded public diff = %#v, %v", diff, operationError)
 	}
 }

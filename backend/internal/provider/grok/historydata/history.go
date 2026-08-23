@@ -8,11 +8,24 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
 
 const (
-	defaultLimit    = 1600
-	defaultMaxBytes = 8_000_000
+	// Grok JSONL backward-scan algorithm invariants preserve parser behavior.
+	backwardMaximumScanBytes  int64 = 64_000_000
+	backwardMinimumScanBytes  int64 = 16_000_000
+	backwardReadMultiplier    int64 = 16
+	backwardEventByteEstimate int64 = 800_000
+	backwardInitialScanBytes  int64 = 1_200_000
+	backwardEventScanEstimate int64 = 80_000
+	backwardScanGrowthBytes   int64 = 4_000_000
+	backwardEventBufferFactor       = 4
+	backwardScanGrowthFactor        = 2
+	chatBudgetNumerator             = 3
+	chatBudgetDenominator           = 4
+	chatBudgetReserve               = 20
 )
 
 // ReadOptions matches server.py's read_session_updates keyword arguments.
@@ -33,29 +46,32 @@ type Event map[string]any
 
 // ReadSessionUpdatesFromRoot reads updates.jsonl through a caller-pinned
 // session root. A symbolic link cannot redirect history into another session.
-func ReadSessionUpdatesFromRoot(sessionRoot *os.Root, displayPath string, options ReadOptions) ([]Event, Meta) {
+func ReadSessionUpdatesFromRoot(sessionRoot *os.Root, displayPath string, historyPolicy providerapi.HistoryPolicy, options ReadOptions) ([]Event, Meta, error) {
+	if operationError := historyPolicy.Validate(); operationError != nil {
+		return nil, nil, operationError
+	}
 	if options.Limit == 0 {
-		options.Limit = defaultLimit
+		options.Limit = historyPolicy.AdapterEventLimit
 	}
 	if options.MaxBytes == 0 {
-		options.MaxBytes = defaultMaxBytes
+		options.MaxBytes = historyPolicy.AdapterReadBytes
 	}
 	path := displayPath
 	fileInfo, operationError := sessionRoot.Lstat("updates.jsonl")
 	if operationError != nil {
-		return []Event{}, Meta{"path": path, "missing": true, "size": int64(0), "has_more": false}
+		return []Event{}, Meta{"path": path, "missing": true, "size": int64(0), "has_more": false}, nil
 	}
 	if fileInfo.Mode()&os.ModeSymlink != 0 || !fileInfo.Mode().IsRegular() {
-		return []Event{}, Meta{"path": path, "error": "updates.jsonl must be a regular file", "size": int64(0), "has_more": false}
+		return []Event{}, Meta{"path": path, "error": "updates.jsonl must be a regular file", "size": int64(0), "has_more": false}, nil
 	}
 	updatesFile, operationError := sessionRoot.Open("updates.jsonl")
 	if operationError != nil {
-		return []Event{}, Meta{"path": path, "missing": true, "size": int64(0), "has_more": false}
+		return []Event{}, Meta{"path": path, "missing": true, "size": int64(0), "has_more": false}, nil
 	}
 	defer updatesFile.Close()
 	openedInfo, operationError := updatesFile.Stat()
 	if operationError != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(fileInfo, openedInfo) {
-		return []Event{}, Meta{"path": path, "error": "updates.jsonl changed while opening", "size": int64(0), "has_more": false}
+		return []Event{}, Meta{"path": path, "error": "updates.jsonl changed while opening", "size": int64(0), "has_more": false}, nil
 	}
 	size := openedInfo.Size()
 	since := options.SinceBytes
@@ -71,14 +87,15 @@ func ReadSessionUpdatesFromRoot(sessionRoot *os.Root, displayPath string, option
 	}
 	maxBytes := options.MaxBytes
 	if maxBytes < 1 {
-		maxBytes = defaultMaxBytes
+		maxBytes = historyPolicy.AdapterReadBytes
 	}
 	if options.Live && since >= size {
-		return []Event{}, Meta{"path": path, "size": size, "returned": 0, "scanned": 0, "since": since, "live": true, "has_more": false, "end": size}
+		return []Event{}, Meta{"path": path, "size": size, "returned": 0, "scanned": 0, "since": since, "live": true, "has_more": false, "end": size}, nil
 	}
 
 	if options.Live {
-		return readLive(updatesFile, path, size, since, limit, maxBytes)
+		events, metadata := readLive(updatesFile, path, size, since, limit, maxBytes, historyPolicy.ChatTextMaxRunes)
+		return events, metadata, nil
 	}
 
 	endCap := size
@@ -92,25 +109,27 @@ func ReadSessionUpdatesFromRoot(sessionRoot *os.Root, displayPath string, option
 		}
 	}
 	if endCap <= 0 {
-		return []Event{}, Meta{"path": path, "size": size, "has_more": false, "window_start": 0, "window_end": 0, "returned": 0, "live": false}
+		return []Event{}, Meta{"path": path, "size": size, "has_more": false, "window_start": 0, "window_end": 0, "returned": 0, "live": false}, nil
 	}
 	if options.ChatOnly {
-		return readChatOnly(updatesFile, path, size, endCap, limit, maxBytes)
+		events, metadata := readChatOnly(updatesFile, path, size, endCap, limit, maxBytes, historyPolicy.ChatTextMaxRunes)
+		return events, metadata, nil
 	}
-	return readFull(updatesFile, path, size, endCap, limit, maxBytes, options.ChatOnly)
+	events, metadata := readFull(updatesFile, path, size, endCap, limit, maxBytes, options.ChatOnly, historyPolicy.ChatTextMaxRunes)
+	return events, metadata, nil
 }
 
-func readLive(updatesFile *os.File, path string, size, since int64, limit int, maxBytes int64) ([]Event, Meta) {
-	start := since
-	if start <= 0 {
-		capBytes := min64(maxBytes, 512_000)
-		start = max64(0, size-capBytes)
-		if start > 0 {
-			start = advanceAfterLine(updatesFile, start, size)
-		}
+func readLive(updatesFile *os.File, path string, size, since int64, limit int, maxBytes int64, chatTextMaxRunes int) ([]Event, Meta) {
+	windowStart := since
+	minimumStart := max64(0, size-maxBytes)
+	clamped := windowStart <= 0 || windowStart < minimumStart || windowStart > size
+	if clamped {
+		windowStart = minimumStart
 	}
-	windowStart := start
-	blob, operationError := readRange(updatesFile, windowStart, size)
+	if clamped && windowStart > 0 {
+		windowStart = advanceAfterLine(updatesFile, windowStart, size)
+	}
+	blob, operationError := readRange(updatesFile, windowStart, size, maxBytes)
 	if operationError != nil {
 		return []Event{}, Meta{"path": path, "error": operationError.Error(), "size": size, "has_more": false}
 	}
@@ -134,13 +153,13 @@ func readLive(updatesFile *os.File, path string, size, since int64, limit int, m
 	if len(scored) > limit {
 		scored = scored[len(scored)-limit:]
 	}
-	return stripAndTrim(scored), Meta{"path": path, "size": size, "end": endPos, "returned": len(scored), "scanned": len(scored), "since": since, "live": true, "has_more": false, "window_start": windowStart}
+	return stripAndTrim(scored, chatTextMaxRunes), Meta{"path": path, "size": size, "end": endPos, "returned": len(scored), "scanned": len(scored), "since": since, "live": true, "has_more": false, "window_start": windowStart}
 }
 
-func readChatOnly(updatesFile *os.File, path string, size, endCap int64, limit int, maxBytes int64) ([]Event, Meta) {
+func readChatOnly(updatesFile *os.File, path string, size, endCap int64, limit int, maxBytes int64, chatTextMaxRunes int) ([]Event, Meta) {
 	want := maxInt(1, limit)
-	maxScan := min64(64_000_000, max64(16_000_000, max64(maxBytes*16, int64(want)*800_000)))
-	scan := min64(maxScan, max64(1_200_000, int64(want)*80_000))
+	maxScan := min64(backwardMaximumScanBytes, max64(backwardMinimumScanBytes, max64(maxBytes*backwardReadMultiplier, int64(want)*backwardEventByteEstimate)))
+	scan := min64(maxScan, max64(backwardInitialScanBytes, int64(want)*backwardEventScanEstimate))
 	var acc []Event
 	readTo := endCap
 	endPos := endCap
@@ -155,7 +174,7 @@ func readChatOnly(updatesFile *os.File, path string, size, endCap int64, limit i
 			windowStart = advanceAfterLine(updatesFile, start, readTo)
 		}
 		if windowStart < readTo {
-			blob, operationError := readRange(updatesFile, windowStart, readTo)
+			blob, operationError := readRange(updatesFile, windowStart, readTo, scan)
 			if operationError != nil {
 				return []Event{}, Meta{"path": path, "error": operationError.Error(), "size": size, "has_more": false}
 			}
@@ -182,7 +201,7 @@ func readChatOnly(updatesFile *os.File, path string, size, endCap int64, limit i
 				}
 				event["_off"] = off
 				acc = append(acc, event)
-				if len(acc) >= want*4 {
+				if len(acc) >= want*backwardEventBufferFactor {
 					stop = true
 					break
 				}
@@ -202,10 +221,10 @@ func readChatOnly(updatesFile *os.File, path string, size, endCap int64, limit i
 			}
 			lastKind = kind
 		}
-		if groups >= want || start <= 0 || scan >= maxScan || len(acc) >= want*4 {
+		if groups >= want || start <= 0 || scan >= maxScan || len(acc) >= want*backwardEventBufferFactor {
 			break
 		}
-		scan = min64(maxScan, max64(scan*2, scan+4_000_000))
+		scan = min64(maxScan, max64(scan*backwardScanGrowthFactor, scan+backwardScanGrowthBytes))
 	}
 
 	chron := reverseEvents(acc)
@@ -222,16 +241,16 @@ func readChatOnly(updatesFile *os.File, path string, size, endCap int64, limit i
 		firstOff = eventOffset(collected[0], firstOff)
 	}
 	hasMore := firstOff > 0 && (start > 0 || len(collected) >= want)
-	return stripAndTrim(collected), Meta{"path": path, "size": size, "returned": len(collected), "scanned": scannedLines, "live": false, "has_more": hasMore, "window_start": firstOff, "window_end": endPos, "end": endPos, "older_before": firstOff, "chat_only": true}
+	return stripAndTrim(collected, chatTextMaxRunes), Meta{"path": path, "size": size, "returned": len(collected), "scanned": scannedLines, "live": false, "has_more": hasMore, "window_start": firstOff, "window_end": endPos, "end": endPos, "older_before": firstOff, "chat_only": true}
 }
 
-func readFull(updatesFile *os.File, path string, size, endCap int64, limit int, maxBytes int64, chatOnly bool) ([]Event, Meta) {
+func readFull(updatesFile *os.File, path string, size, endCap int64, limit int, maxBytes int64, chatOnly bool, chatTextMaxRunes int) ([]Event, Meta) {
 	start := max64(0, endCap-maxBytes)
 	windowStart := start
 	if start > 0 {
 		windowStart = advanceAfterLine(updatesFile, start, endCap)
 	}
-	blob, operationError := readRange(updatesFile, windowStart, endCap)
+	blob, operationError := readRange(updatesFile, windowStart, endCap, maxBytes)
 	if operationError != nil {
 		return []Event{}, Meta{"path": path, "error": operationError.Error(), "size": size, "has_more": false}
 	}
@@ -279,7 +298,7 @@ func readFull(updatesFile *os.File, path string, size, endCap int64, limit int, 
 				toolIndexes = append(toolIndexes, itemIndex)
 			}
 		}
-		chatBudget := maxInt(limit*3/4, maxInt(1, limit-20))
+		chatBudget := maxInt(limit*chatBudgetNumerator/chatBudgetDenominator, maxInt(1, limit-chatBudgetReserve))
 		keep := map[int]struct{}{}
 		for _, itemIndex := range lastInts(chatIndexes, chatBudget) {
 			keep[itemIndex] = struct{}{}
@@ -301,7 +320,7 @@ func readFull(updatesFile *os.File, path string, size, endCap int64, limit int, 
 	if len(kept) > 0 {
 		firstOff = eventOffset(kept[0], windowStart)
 	}
-	events := stripAndTrim(kept)
+	events := stripAndTrim(kept, chatTextMaxRunes)
 	hasMore := windowStart > 0 || trimmed
 	return events, Meta{"path": path, "size": size, "returned": len(events), "scanned": len(scored), "live": false, "has_more": hasMore, "window_start": firstOff, "window_end": endPos, "end": endPos, "older_before": firstOff, "chat_only": chatOnly}
 }
@@ -359,9 +378,12 @@ func splitLinesKeepEnds(blob []byte) [][]byte {
 	return lines
 }
 
-func readRange(updatesFile *os.File, start, end int64) ([]byte, error) {
-	if end < start {
+func readRange(updatesFile *os.File, start, end, maxBytes int64) ([]byte, error) {
+	if start < 0 || end < start || maxBytes <= 0 {
 		return nil, errors.New("invalid byte range")
+	}
+	if end-start > maxBytes {
+		return nil, errors.New("byte range exceeds maximum")
 	}
 	buffer := make([]byte, end-start)
 	readLength, operationError := updatesFile.ReadAt(buffer, start)

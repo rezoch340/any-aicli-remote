@@ -23,7 +23,7 @@ func TestCommandPinsOpenedDirectory(testInstance *testing.T) {
 	if operationError := os.Symlink("inside", linkPath); operationError != nil {
 		testInstance.Fatal(operationError)
 	}
-	filesystem, operationError := fsapi.New(workspaceDirectory)
+	filesystem, operationError := fsapi.New(workspaceDirectory, fsapi.Policy{MaxReadBytes: 1024, MaxWriteBytes: 1024, MaxListItems: 10})
 	if operationError != nil {
 		testInstance.Fatal(operationError)
 	}

@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+const (
+	millisecondsTimestampThreshold = int64(1_000_000_000_000)
+	millisecondsPerSecond          = int64(1000)
+)
+
 func CanonicalDirectory(rawPath string) (string, error) {
 	path := strings.TrimSpace(os.ExpandEnv(rawPath))
 	if path == "" {
@@ -102,10 +107,10 @@ func ParseTimestampMilliseconds(value any) int64 {
 }
 
 func normalizeTimestamp(value int64) int64 {
-	if value > 1_000_000_000_000 {
+	if value > millisecondsTimestampThreshold {
 		return value
 	}
-	return value * 1000
+	return value * millisecondsPerSecond
 }
 
 func ExtractText(content any) string {

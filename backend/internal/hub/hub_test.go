@@ -251,7 +251,10 @@ func TestNewSessionBindingWorksBeforeProviderHistoryPersistsAndDoesNotCrossWorks
 	firstWorkspace := testInstance.TempDir()
 	secondWorkspace := testInstance.TempDir()
 	providerInstance := &testProvider{sessionDirectories: map[string]string{}}
-	hubInstance := New(agent.websocketURL(), providerInstance, providerInstance, nil, nil)
+	hubInstance, operationError := New(agent.websocketURL(), providerInstance, providerInstance, nil, testHubPolicy(), nil)
+	if operationError != nil {
+		testInstance.Fatal(operationError)
+	}
 	defer hubInstance.Close()
 	client, closeClient := connectHubClient(testInstance, hubInstance)
 	defer closeClient()
@@ -367,18 +370,18 @@ func TestReadTextFileKeepsLineEndingsAndHonorsExplicitZeroLimit(testInstance *te
 	if operationError := os.WriteFile(path, []byte("one\r\ntwo\nthree"), 0o644); operationError != nil {
 		testInstance.Fatal(operationError)
 	}
-	result, operationError := readTextFile(map[string]any{"path": path, "line": 2, "limit": 1}, workingDirectory)
+	result, operationError := readTextFile(map[string]any{"path": path, "line": 2, "limit": 1}, workingDirectory, testHubPolicy().ReverseReadBytes)
 	if operationError != nil {
 		testInstance.Fatal(operationError)
 	}
 	if result["content"] != "two\n" {
 		testInstance.Fatalf("content = %q", result["content"])
 	}
-	result, operationError = readTextFile(map[string]any{"path": path, "limit": 0}, workingDirectory)
+	result, operationError = readTextFile(map[string]any{"path": path, "limit": 0}, workingDirectory, testHubPolicy().ReverseReadBytes)
 	if operationError != nil || result["content"] != "" {
 		testInstance.Fatalf("zero limit result=%#v err=%v", result, operationError)
 	}
-	result, operationError = readTextFile(map[string]any{"path": path, "line": 3}, workingDirectory)
+	result, operationError = readTextFile(map[string]any{"path": path, "line": 3}, workingDirectory, testHubPolicy().ReverseReadBytes)
 	if operationError != nil || result["content"] != "three" {
 		testInstance.Fatalf("final line result=%#v err=%v", result, operationError)
 	}
@@ -412,5 +415,46 @@ func TestClosePreventsInFlightEnsureFromStartingAgent(testInstance *testing.T) {
 	}
 	if got := starts.Load(); got != 0 {
 		testInstance.Fatalf("closed hub invoked the agent starter %d time(s)", got)
+	}
+}
+
+func TestNewStoresCustomPolicy(testInstance *testing.T) {
+	policy := testHubPolicy()
+	policy.PendingLimit = 7
+	policy.PendingClientLimit = 3
+	policy.PendingTimeout = 41 * time.Millisecond
+	policy.TerminalOutputBytes = 2048
+	policy.MaxMessageBytes = 4096
+	policy.WriteTimeout = 17 * time.Millisecond
+	policy.ControlWriteTimeout = 19 * time.Millisecond
+	providerInstance := &testProvider{workingDirectory: testInstance.TempDir()}
+	hubInstance, operationError := New("ws://127.0.0.1:1", providerInstance, providerInstance, nil, policy, nil)
+	if operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	defer hubInstance.Close()
+	if hubInstance.pendingLimit != policy.PendingLimit || hubInstance.pendingClientLimit != policy.PendingClientLimit || hubInstance.pendingTimeout != policy.PendingTimeout {
+		testInstance.Fatalf("pending policy not preserved: %#v", hubInstance)
+	}
+	if hubInstance.terminals.defaultOutputBytes != policy.TerminalOutputBytes || hubInstance.upgrader.ReadBufferSize != policy.ReadBufferBytes || hubInstance.upgrader.WriteBufferSize != policy.WriteBufferBytes {
+		testInstance.Fatalf("hub policy not preserved: %#v", hubInstance.policy)
+	}
+	client := &clientConnection{writeTimeout: policy.WriteTimeout, controlWriteTimeout: policy.ControlWriteTimeout}
+	if client.writeTimeout != policy.WriteTimeout || client.controlWriteTimeout != policy.ControlWriteTimeout {
+		testInstance.Fatal("websocket deadline policy not preserved")
+	}
+}
+
+func TestNewRejectsInvalidPolicy(testInstance *testing.T) {
+	providerInstance := &testProvider{workingDirectory: testInstance.TempDir()}
+	policy := testHubPolicy()
+	policy.ReadBufferBytes = 0
+	if _, operationError := New("ws://127.0.0.1:1", providerInstance, providerInstance, nil, policy, nil); operationError == nil {
+		testInstance.Fatal("zero buffer policy accepted")
+	}
+	policy = testHubPolicy()
+	policy.PendingClientLimit = policy.PendingLimit + 1
+	if _, operationError := New("ws://127.0.0.1:1", providerInstance, providerInstance, nil, policy, nil); operationError == nil {
+		testInstance.Fatal("invalid pending policy accepted")
 	}
 }

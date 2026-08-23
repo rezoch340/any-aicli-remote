@@ -25,7 +25,9 @@ func (server *Server) handleStackStop(responseWriter http.ResponseWriter, reques
 	var body struct {
 		KeepAgent bool `json:"keep_agent"`
 	}
-	decodeLooseJSON(request, &body)
+	if !server.decodeLooseJSON(responseWriter, request, &body) {
+		return
+	}
 	status := server.processStatus()
 	agentProcessIDs := status.OwnedProcessIDs
 	if body.KeepAgent {
@@ -33,7 +35,7 @@ func (server *Server) handleStackStop(responseWriter http.ResponseWriter, reques
 	}
 	writeJSON(responseWriter, http.StatusOK, map[string]any{"ok": true, "stopping": true, "self_pid": os.Getpid(), "agent_pids": agentProcessIDs, "message": "daemon stopping; provider agent will stop unless keep_agent"})
 	go func() {
-		time.Sleep(350 * time.Millisecond)
+		time.Sleep(server.configuration.Canonical.Tuning.Lifecycle.StackSettle.Duration)
 		server.requestStop(body.KeepAgent)
 	}()
 }
@@ -47,7 +49,9 @@ func (server *Server) handleStackStart(responseWriter http.ResponseWriter, reque
 	}
 
 	var body map[string]any
-	decodeLooseJSON(request, &body)
+	if !server.decodeLooseJSON(responseWriter, request, &body) {
+		return
+	}
 	force := boolValue(body["force"]) || boolValue(body["restart"])
 
 	server.agentLifecycleMutex.Lock()
@@ -79,7 +83,7 @@ func (server *Server) handleStackStart(responseWriter http.ResponseWriter, reque
 	server.processMutex.Unlock()
 	listening := status.Listening
 	if needWait {
-		waitContext, waitCancel := context.WithTimeout(request.Context(), 24*time.Second)
+		waitContext, waitCancel := context.WithTimeout(request.Context(), server.configuration.Canonical.Tuning.Lifecycle.StackWait.Duration)
 		listening = server.waitForAgent(waitContext)
 		waitCancel()
 	}
@@ -99,12 +103,12 @@ func (server *Server) handleStackStart(responseWriter http.ResponseWriter, reque
 		started = startResult.Started
 		message = startResult.Message
 	}
-	executionContext, cancel := context.WithTimeout(request.Context(), 18*time.Second)
+	executionContext, cancel := context.WithTimeout(request.Context(), server.configuration.Canonical.Tuning.Lifecycle.StartTimeout.Duration)
 	errorValue := server.hub.Ensure(executionContext)
 	cancel()
 	status = server.processStatus()
 	if errorValue != nil && status.Owned {
-		restartContext, restartCancel := context.WithTimeout(request.Context(), 24*time.Second)
+		restartContext, restartCancel := context.WithTimeout(request.Context(), server.configuration.Canonical.Tuning.Lifecycle.StackWait.Duration)
 		restartAttempt, restartError := server.restartOwnedAgentForAuthentication(restartContext)
 		restartCancel()
 		if restartAttempt.attempted {
@@ -112,7 +116,7 @@ func (server *Server) handleStackStart(responseWriter http.ResponseWriter, reque
 		}
 		if restartError == nil && restartAttempt.listening {
 			started = started || restartAttempt.result.Started
-			executionContext, cancel = context.WithTimeout(request.Context(), 18*time.Second)
+			executionContext, cancel = context.WithTimeout(request.Context(), server.configuration.Canonical.Tuning.Lifecycle.RestartTimeout.Duration)
 			errorValue = server.hub.Ensure(executionContext)
 			cancel()
 		} else {

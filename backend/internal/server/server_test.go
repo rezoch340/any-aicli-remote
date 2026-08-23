@@ -41,7 +41,7 @@ func newRouteTestServerWithAgentPort(testingContext *testing.T, agentPort int) *
 	root := filepath.Join(base, "workspace")
 	data := filepath.Join(base, "data")
 	sessions := filepath.Join(base, "sessions")
-	for _, directory := range []string{home, root, data, sessions} {
+	for _, directory := range []string{home, root, sessions} {
 		if errorValue := os.MkdirAll(directory, 0o755); errorValue != nil {
 			testingContext.Fatal(errorValue)
 		}
@@ -79,6 +79,12 @@ func newRouteTestServerWithAgentPort(testingContext *testing.T, agentPort int) *
 	writeSessionSummary("session-1")
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	canonical := config.DefaultDocument(home)
+	canonical.Network.Bind, canonical.Network.Port = "127.0.0.1", 35421
+	canonical.Agent.Host, canonical.Agent.Port, canonical.Agent.Ensure = "127.0.0.1", agentPort, false
+	canonical.Storage.DataDirectory, canonical.Storage.RuntimeDirectory = data, filepath.Join(data, "run")
+	canonical.Provider.ExecutablePath = providerExecutable
+	canonical.Provider.Options = map[string]string{"sessions-directory": sessions}
 	server, errorValue := New(config.Config{
 		Bind:            "127.0.0.1",
 		Port:            35421,
@@ -90,9 +96,17 @@ func newRouteTestServerWithAgentPort(testingContext *testing.T, agentPort int) *
 		DataDirectory:   data,
 		ProviderOptions: map[string]string{"sessions-directory": sessions},
 		EnsureAgent:     false,
+		Canonical:       canonical,
 	}, logger)
 	if errorValue != nil {
 		testingContext.Fatal(errorValue)
+	}
+	dataInformation, errorValue := os.Stat(data)
+	if errorValue != nil {
+		testingContext.Fatal(errorValue)
+	}
+	if dataInformation.Mode().Perm() != 0o700 {
+		testingContext.Fatalf("data directory mode = %o", dataInformation.Mode().Perm())
 	}
 	// Route tests must not inspect or start any real process.
 	server.process.Operations.ListenProcessIDs = func(int, bool) ([]int, error) { return nil, nil }

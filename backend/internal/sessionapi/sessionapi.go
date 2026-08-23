@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rezoch340/any-aicli-remote/backend/internal/atomicfile"
 	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
 
@@ -28,16 +29,22 @@ type Service struct {
 	Providers         *providerapi.Registry
 	DefaultProviderID string
 	DataDirectory     string
+	historyPolicy     providerapi.HistoryPolicy
 
 	mutex sync.Mutex
 }
 
-func New(providers *providerapi.Registry, defaultProviderID, dataDirectory string) *Service {
+func New(providers *providerapi.Registry, defaultProviderID, dataDirectory string, historyPolicy providerapi.HistoryPolicy) (*Service, error) {
 	if providers == nil {
 		providers = providerapi.NewRegistry()
 	}
-	return &Service{Providers: providers, DefaultProviderID: defaultProviderID, DataDirectory: dataDirectory}
+	if operationError := historyPolicy.Validate(); operationError != nil {
+		return nil, operationError
+	}
+	return &Service{Providers: providers, DefaultProviderID: defaultProviderID, DataDirectory: dataDirectory, historyPolicy: historyPolicy}, nil
 }
+
+func (service *Service) HistoryPolicy() providerapi.HistoryPolicy { return service.historyPolicy }
 
 func (service *Service) provider(providerID string) (providerapi.Provider, error) {
 	providerID = strings.TrimSpace(providerID)
@@ -83,27 +90,7 @@ func (service *Service) History(operationContext context.Context, query HistoryQ
 	if operationError != nil {
 		return HistoryResult{}, operationError
 	}
-	limit := query.Limit
-	if limit == 0 {
-		if query.Live {
-			limit = 400
-		} else {
-			limit = 100
-		}
-	}
-	limit = min(4000, max(20, limit))
-	maxBytes := query.MaxBytes
-	if maxBytes == 0 {
-		switch {
-		case query.Live:
-			maxBytes = 512_000
-		case query.BeforeBytes != nil:
-			maxBytes = 1_200_000
-		default:
-			maxBytes = 400_000
-		}
-	}
-	maxBytes = min(int64(12_000_000), max(int64(64_000), maxBytes))
+	limit, maxBytes := service.historyPolicy.NormalizeRequest(query.Live, query.BeforeBytes, query.Limit, query.MaxBytes)
 	page, operationError := providerInstance.ReadHistory(operationContext, providerapi.HistoryQuery{
 		SessionID: sessionID, Live: query.Live, Limit: limit, SinceBytes: query.SinceBytes,
 		BeforeBytes: query.BeforeBytes, MaxBytes: maxBytes, ChatOnly: query.ChatOnly,
@@ -154,7 +141,7 @@ func (service *Service) Titles(operationContext context.Context, providerID stri
 	}
 	titles := make(map[string]TitleInfo)
 	for itemIndex, rawSessionID := range sessionIDs {
-		if itemIndex >= 250 {
+		if itemIndex >= service.historyPolicy.TitleBatchLimit {
 			break
 		}
 		sessionID := strings.TrimSpace(rawSessionID)
@@ -334,7 +321,7 @@ func (service *Service) Rename(operationContext context.Context, request RenameR
 	if operationError != nil {
 		return RenameResult{}, operationError
 	}
-	providerResult, operationError := providerInstance.RenameSession(operationContext, sessionID, truncateRunes(title, 160))
+	providerResult, operationError := providerInstance.RenameSession(operationContext, sessionID, truncateRunes(title, service.historyPolicy.RenameTitleMaxRunes))
 	if operationError != nil {
 		result := RenameResult{OK: false, Error: NotFoundError.Error(), ProviderID: providerInstance.ID(), SessionID: sessionID}
 		if errors.Is(operationError, providerapi.SessionNotFoundError) {
@@ -374,20 +361,11 @@ func (service *Service) loadArchivedLocked() ([]string, string, error) {
 
 func (service *Service) saveArchivedLocked(sessionIDs []string) ([]string, error) {
 	sessionIDs = cleanIDs(sessionIDs)
-	if operationError := os.MkdirAll(service.DataDirectory, 0o700); operationError != nil {
-		return nil, operationError
-	}
 	data, operationError := json.MarshalIndent(sessionIDs, "", "  ")
 	if operationError != nil {
 		return nil, operationError
 	}
-	path := service.archivedPath()
-	temporaryPath := path + ".tmp"
-	if operationError := os.WriteFile(temporaryPath, append(data, '\n'), 0o600); operationError != nil {
-		return nil, operationError
-	}
-	if operationError := os.Rename(temporaryPath, path); operationError != nil {
-		_ = os.Remove(temporaryPath)
+	if operationError := atomicfile.WritePrivate(service.archivedPath(), append(data, '\n')); operationError != nil {
 		return nil, operationError
 	}
 	return sessionIDs, nil

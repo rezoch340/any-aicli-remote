@@ -39,7 +39,7 @@ func (server *Server) handleGitLog(responseWriter http.ResponseWriter, request *
 		writeWorkspaceError(responseWriter, errorValue)
 		return
 	}
-	result, errorValue := gitService.Log(request.Context(), intQuery(query.Get("n"), 12))
+	result, errorValue := gitService.Log(request.Context(), intQuery(query.Get("n"), server.gitPolicy.LogDefaultLimit))
 	if errorValue != nil {
 		writeJSON(responseWriter, http.StatusOK, map[string]any{"ok": false, "error": errorValue.Error(), "commits": []any{}})
 		return

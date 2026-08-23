@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -18,8 +19,12 @@ import (
 )
 
 const (
-	DefaultPort      = 2421
-	DefaultAgentPort = 2419
+	DefaultPort                = 2421
+	DefaultAgentPort           = 2419
+	minimumSecretCharacters    = 16
+	generatedSecretRandomBytes = 16
+	standardHTTPPort           = 80
+	standardHTTPSPort          = 443
 )
 
 type Config struct {
@@ -39,77 +44,79 @@ type Config struct {
 	EnsureAgent       bool
 	StopAgentOnExit   bool
 	ProviderOptions   map[string]string
+	ConfigurationPath string
+	Canonical         Document
 }
 
-func Parse(arguments []string) (Config, error) {
+func Resolve(arguments []string) (Config, error) { return resolve(arguments, true, os.Stderr) }
+
+// ResolveNonSecret resolves effective non-secret settings without inspecting secret environment variables or files.
+func ResolveNonSecret(arguments []string) (Config, error) {
+	return ResolveNonSecretWithOutput(arguments, io.Discard)
+}
+
+// ResolveNonSecretWithOutput resolves non-secret settings and directs flag diagnostics to output.
+func ResolveNonSecretWithOutput(arguments []string, output io.Writer) (Config, error) {
+	return resolve(arguments, false, output)
+}
+
+func resolve(arguments []string, includeSecrets bool, output io.Writer) (Config, error) {
 	home, operationError := os.UserHomeDir()
 	if operationError != nil {
 		return Config{}, fmt.Errorf("resolve home: %w", operationError)
 	}
-	dataDirectory := compat.Environment("ANY_AI_CLI_REMOTE_DATA_DIR", filepath.Join(home, ".any-aicli-remote"))
-
-	configuration := Config{
-		Bind:              compat.Environment("ANY_AI_CLI_REMOTE_BIND", "0.0.0.0"),
-		Port:              environmentInteger("ANY_AI_CLI_REMOTE_PORT", DefaultPort),
-		AgentHost:         compat.Environment("ANY_AI_CLI_REMOTE_AGENT_HOST", "127.0.0.1"),
-		AgentPort:         environmentInteger("ANY_AI_CLI_REMOTE_AGENT_PORT", DefaultAgentPort),
-		PairingSecret:     compat.Environment("ANY_AI_CLI_REMOTE_PAIRING_SECRET", ""),
-		PairingSecretFile: compat.Environment("ANY_AI_CLI_REMOTE_PAIRING_SECRET_FILE", ""),
-		AgentSecret:       compat.Environment("ANY_AI_CLI_REMOTE_AGENT_SECRET", ""),
-		AgentSecretFile:   compat.Environment("ANY_AI_CLI_REMOTE_AGENT_SECRET_FILE", ""),
-		RuntimeDirectory:  compat.Environment("ANY_AI_CLI_REMOTE_RUNTIME_DIR", filepath.Join(dataDirectory, "run")),
-		PublicHost:        compat.Environment("ANY_AI_CLI_REMOTE_PUBLIC_HOST", ""),
-		ProviderID:        compat.Environment("ANY_AI_CLI_REMOTE_PROVIDER", providerfactory.DefaultProviderID),
-		ProviderPath:      compat.Environment("ANY_AI_CLI_REMOTE_PROVIDER_PATH", ""),
-		DataDirectory:     dataDirectory,
-		EnsureAgent:       compat.BooleanEnvironment("ANY_AI_CLI_REMOTE_ENSURE_AGENT", true),
-		StopAgentOnExit:   compat.BooleanEnvironment("ANY_AI_CLI_REMOTE_STOP_AGENT_ON_EXIT", false),
+	configurationPath, operationError := ResolveConfigurationPath(arguments)
+	if operationError != nil {
+		return Config{}, operationError
 	}
-	providerOptions := providerfactory.NewOptionParser()
-
+	document, operationError := LoadDocument(configurationPath, home)
+	if operationError != nil {
+		return Config{}, fmt.Errorf("load config: %w", operationError)
+	}
+	if operationError := applyEnvironment(&document); operationError != nil {
+		return Config{}, operationError
+	}
+	providerOptions := providerfactory.NewOptionParserWithValues(document.Provider.Options)
+	if operationError := providerOptions.ApplyEnvironment(); operationError != nil {
+		return Config{}, operationError
+	}
+	pairingSecretFile, agentSecretFile := "", ""
+	if includeSecrets {
+		pairingSecretFile, agentSecretFile = compat.Environment("ANY_AI_CLI_REMOTE_PAIRING_SECRET_FILE", ""), compat.Environment("ANY_AI_CLI_REMOTE_AGENT_SECRET_FILE", "")
+	}
 	flagSet := flag.NewFlagSet("any-aicli-remote-daemon", flag.ContinueOnError)
-	flagSet.SetOutput(os.Stderr)
-	flagSet.StringVar(&configuration.Bind, "bind", configuration.Bind, "HTTP bind address")
-	flagSet.IntVar(&configuration.Port, "port", configuration.Port, "HTTP/WebSocket port")
-	flagSet.StringVar(&configuration.AgentHost, "agent-host", configuration.AgentHost, "provider agent host")
-	flagSet.IntVar(&configuration.AgentPort, "agent-port", configuration.AgentPort, "provider agent port")
-	flagSet.StringVar(&configuration.PairingSecretFile, "pairing-secret-file", configuration.PairingSecretFile, "device pairing secret file")
-	flagSet.StringVar(&configuration.PairingSecretFile, "secret-file", configuration.PairingSecretFile, "deprecated alias for --pairing-secret-file")
-	flagSet.StringVar(&configuration.AgentSecretFile, "agent-secret-file", configuration.AgentSecretFile, "local provider-agent transport secret file")
-	flagSet.StringVar(&configuration.RuntimeDirectory, "runtime-dir", configuration.RuntimeDirectory, "neutral daemon runtime directory")
-	legacyWorkingDirectory := compat.Environment("ANY_AI_CLI_REMOTE_CWD", "")
-	flagSet.StringVar(&legacyWorkingDirectory, "cwd", legacyWorkingDirectory, "deprecated compatibility option; a workspace is selected only when creating a session")
-	flagSet.StringVar(&configuration.PublicHost, "public-host", configuration.PublicHost, "public pairing host")
-	flagSet.StringVar(&configuration.ProviderID, "provider", configuration.ProviderID, "CLI provider identifier")
-	flagSet.StringVar(&configuration.ProviderPath, "provider-path", configuration.ProviderPath, "path to provider CLI")
-	flagSet.StringVar(&configuration.DataDirectory, "data-dir", configuration.DataDirectory, "daemon data directory")
-	flagSet.BoolVar(&configuration.EnsureAgent, "ensure-agent", configuration.EnsureAgent, "start the provider agent when needed")
-	flagSet.BoolVar(&configuration.StopAgentOnExit, "stop-agent-on-exit", configuration.StopAgentOnExit, "stop the owned provider agent when the daemon exits")
-	providerOptions.BindFlags(flagSet, &configuration.ProviderPath)
+	flagSet.SetOutput(output)
+	bindFlags(flagSet, &document, providerOptions, &pairingSecretFile, &agentSecretFile, &configurationPath)
+	for index, argument := range arguments {
+		if isPlaintextSecretArgument(argument) {
+			return Config{}, errors.New("plaintext secrets are not accepted")
+		}
+		if (argument == "--config" || argument == "-config") && (index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "") {
+			return Config{}, errors.New("config path cannot be empty")
+		}
+		if (strings.HasPrefix(argument, "--config=") || strings.HasPrefix(argument, "-config=")) && strings.TrimSpace(argument[strings.IndexByte(argument, '=')+1:]) == "" {
+			return Config{}, errors.New("config path cannot be empty")
+		}
+	}
 	if operationError := flagSet.Parse(arguments); operationError != nil {
 		return Config{}, operationError
 	}
-	if configuration.Port < 1 || configuration.Port > 65535 || configuration.AgentPort < 1 || configuration.AgentPort > 65535 {
-		return Config{}, errors.New("ports must be between 1 and 65535")
-	}
-	if configuration.Port == configuration.AgentPort {
-		return Config{}, errors.New("HTTP and agent ports must differ")
-	}
-
-	configuration.DataDirectory = expandHome(configuration.DataDirectory, home)
-	configuration.RuntimeDirectory, operationError = filepath.Abs(expandHome(configuration.RuntimeDirectory, home))
+	configurationPath, operationError = ResolveConfigurationPath(arguments)
 	if operationError != nil {
-		return Config{}, fmt.Errorf("resolve runtime directory: %w", operationError)
-	}
-	configuration.ProviderPath = expandHome(configuration.ProviderPath, home)
-	configuration.ProviderOptions = providerOptions.Values()
-	for optionName, optionValue := range configuration.ProviderOptions {
-		configuration.ProviderOptions[optionName] = expandHome(optionValue, home)
-	}
-	migratePairingSecret := configuration.PairingSecret == "" && configuration.PairingSecretFile == ""
-	if operationError := compat.MigrateDataFiles(configuration.DataDirectory, home, migratePairingSecret); operationError != nil {
 		return Config{}, operationError
 	}
+	document.Provider.Options = providerOptions.Values()
+	document = NormalizeDocument(document, home)
+	if operationError := ValidateDocument(document); operationError != nil {
+		return Config{}, operationError
+	}
+	configuration := ApplyCanonical(Config{ConfigurationPath: configurationPath, Canonical: document}, document)
+	if !includeSecrets {
+		return configuration, nil
+	}
+	configuration.PairingSecret = strings.TrimSpace(os.Getenv("ANY_AI_CLI_REMOTE_PAIRING_SECRET"))
+	configuration.AgentSecret = strings.TrimSpace(os.Getenv("ANY_AI_CLI_REMOTE_AGENT_SECRET"))
+	configuration.PairingSecretFile, configuration.AgentSecretFile = pairingSecretFile, agentSecretFile
 	if configuration.PairingSecretFile == "" {
 		configuration.PairingSecretFile = filepath.Join(configuration.DataDirectory, "pairing-secret")
 	} else {
@@ -119,6 +126,89 @@ func Parse(arguments []string) (Config, error) {
 		configuration.AgentSecretFile = filepath.Join(configuration.DataDirectory, "agent-transport-secret")
 	} else {
 		configuration.AgentSecretFile = expandHome(configuration.AgentSecretFile, home)
+	}
+	return configuration, nil
+}
+
+// ResolveConfigurationPath returns the canonical path selected by environment and config flags.
+func ResolveConfigurationPath(arguments []string) (string, error) {
+	home, operationError := os.UserHomeDir()
+	if operationError != nil {
+		return "", fmt.Errorf("resolve home: %w", operationError)
+	}
+	configurationPath := strings.TrimSpace(os.Getenv("ANY_AI_CLI_REMOTE_CONFIG"))
+	if configurationPath == "" {
+		configurationPath = filepath.Join(home, ".any-aicli-remote", "config.json")
+	}
+	for index := 0; index < len(arguments); index++ {
+		argument := arguments[index]
+		if argument == "--config" || argument == "-config" {
+			if index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" {
+				return "", errors.New("config path cannot be empty")
+			}
+			configurationPath = arguments[index+1]
+			index++
+			continue
+		}
+		if strings.HasPrefix(argument, "--config=") || strings.HasPrefix(argument, "-config=") {
+			configurationPath = argument[strings.IndexByte(argument, '=')+1:]
+			if strings.TrimSpace(configurationPath) == "" {
+				return "", errors.New("config path cannot be empty")
+			}
+		}
+	}
+	return canonicalConfigurationPath(configurationPath, home)
+}
+
+// ApplyCanonical overlays every non-secret runtime field from a validated canonical document.
+func ApplyCanonical(configuration Config, document Document) Config {
+	configuration.Bind = document.Network.Bind
+	configuration.Port = document.Network.Port
+	configuration.AgentHost = document.Agent.Host
+	configuration.AgentPort = document.Agent.Port
+	configuration.RuntimeDirectory = document.Storage.RuntimeDirectory
+	configuration.PublicHost = document.Network.PublicHost
+	configuration.ProviderID = document.Provider.ID
+	configuration.ProviderPath = document.Provider.ExecutablePath
+	configuration.DataDirectory = document.Storage.DataDirectory
+	configuration.EnsureAgent = document.Agent.Ensure
+	configuration.StopAgentOnExit = document.Agent.StopOnExit
+	configuration.ProviderOptions = cloneOptions(document.Provider.Options)
+	configuration.Canonical = document
+	configuration.Canonical.Provider.Options = cloneOptions(document.Provider.Options)
+	return configuration
+}
+
+func cloneOptions(source map[string]string) map[string]string {
+	result := make(map[string]string, len(source))
+	for optionName, optionValue := range source {
+		result[optionName] = strings.TrimSpace(optionValue)
+	}
+	return result
+}
+
+func isPlaintextSecretArgument(argument string) bool {
+	name := argument
+	if separator := strings.IndexByte(name, '='); separator >= 0 {
+		name = name[:separator]
+	}
+	return name == "--secret" || name == "-secret" || name == "--pairing-secret" || name == "-pairing-secret" || name == "--agent-secret" || name == "-agent-secret"
+}
+
+func Parse(arguments []string) (Config, error) {
+	configuration, operationError := Resolve(arguments)
+	if operationError != nil {
+		return Config{}, operationError
+	}
+	home, operationError := os.UserHomeDir()
+	if operationError != nil {
+		return Config{}, operationError
+	}
+	if configuration.PairingSecret == "" && configuration.PairingSecretFile == "" {
+		configuration.PairingSecretFile = filepath.Join(configuration.DataDirectory, "pairing-secret")
+	}
+	if operationError := compat.MigrateDataFiles(configuration.DataDirectory, home, configuration.PairingSecret == "" && filepath.Clean(configuration.PairingSecretFile) == filepath.Join(filepath.Clean(configuration.DataDirectory), "pairing-secret")); operationError != nil {
+		return Config{}, operationError
 	}
 	if configuration.PairingSecret == "" {
 		configuration.PairingSecret, operationError = loadOrCreateSecret(configuration.PairingSecretFile)
@@ -132,13 +222,88 @@ func Parse(arguments []string) (Config, error) {
 			return Config{}, operationError
 		}
 	}
-	if len(configuration.PairingSecret) < 16 {
-		return Config{}, errors.New("pairing secret must contain at least 16 characters")
-	}
-	if len(configuration.AgentSecret) < 16 {
-		return Config{}, errors.New("agent transport secret must contain at least 16 characters")
+	if len(configuration.PairingSecret) < minimumSecretCharacters || len(configuration.AgentSecret) < minimumSecretCharacters {
+		return Config{}, errors.New("secrets must contain at least 16 characters")
 	}
 	return configuration, nil
+}
+
+func bindFlags(flagSet *flag.FlagSet, document *Document, options *providerfactory.OptionParser, pairingSecretFile *string, agentSecretFile *string, configurationPath *string) {
+	flagSet.StringVar(configurationPath, "config", *configurationPath, "configuration file")
+	flagSet.StringVar(&document.Network.Bind, "bind", document.Network.Bind, "HTTP bind address")
+	flagSet.IntVar(&document.Network.Port, "port", document.Network.Port, "HTTP/WebSocket port")
+	flagSet.StringVar(&document.Agent.Host, "agent-host", document.Agent.Host, "provider agent host")
+	flagSet.IntVar(&document.Agent.Port, "agent-port", document.Agent.Port, "provider agent port")
+	var legacyWorkingDirectory string
+	flagSet.StringVar(pairingSecretFile, "pairing-secret-file", *pairingSecretFile, "device pairing secret file")
+	flagSet.StringVar(pairingSecretFile, "secret-file", *pairingSecretFile, "deprecated alias")
+	flagSet.StringVar(agentSecretFile, "agent-secret-file", *agentSecretFile, "local secret file")
+	flagSet.StringVar(&legacyWorkingDirectory, "cwd", "", "deprecated compatibility option")
+	flagSet.StringVar(&document.Storage.RuntimeDirectory, "runtime-dir", document.Storage.RuntimeDirectory, "runtime directory")
+	flagSet.StringVar(&document.Network.PublicHost, "public-host", document.Network.PublicHost, "public host")
+	flagSet.StringVar(&document.Provider.ID, "provider", document.Provider.ID, "provider identifier")
+	flagSet.StringVar(&document.Provider.ExecutablePath, "provider-path", document.Provider.ExecutablePath, "provider path")
+	flagSet.StringVar(&document.Storage.DataDirectory, "data-dir", document.Storage.DataDirectory, "data directory")
+	flagSet.BoolVar(&document.Agent.Ensure, "ensure-agent", document.Agent.Ensure, "ensure provider")
+	flagSet.BoolVar(&document.Agent.StopOnExit, "stop-agent-on-exit", document.Agent.StopOnExit, "stop provider")
+	options.BindFlags(flagSet, &document.Provider.ExecutablePath)
+}
+
+func applyEnvironment(document *Document) error {
+	setString := func(key string, target *string) {
+		if value := compat.Environment(key, ""); value != "" {
+			*target = value
+		}
+	}
+	setInteger := func(key string, target *int) error {
+		if value := compat.Environment(key, ""); value != "" {
+			parsed, parseError := strconv.Atoi(value)
+			if parseError != nil {
+				return fmt.Errorf("%s must be an integer", key)
+			}
+			*target = parsed
+		}
+		return nil
+	}
+	setString("ANY_AI_CLI_REMOTE_BIND", &document.Network.Bind)
+	setString("ANY_AI_CLI_REMOTE_AGENT_HOST", &document.Agent.Host)
+	setString("ANY_AI_CLI_REMOTE_PUBLIC_HOST", &document.Network.PublicHost)
+	setString("ANY_AI_CLI_REMOTE_PROVIDER", &document.Provider.ID)
+	setString("ANY_AI_CLI_REMOTE_PROVIDER_PATH", &document.Provider.ExecutablePath)
+	setString("ANY_AI_CLI_REMOTE_DATA_DIR", &document.Storage.DataDirectory)
+	setString("ANY_AI_CLI_REMOTE_RUNTIME_DIR", &document.Storage.RuntimeDirectory)
+	if portError := setInteger("ANY_AI_CLI_REMOTE_PORT", &document.Network.Port); portError != nil {
+		return portError
+	}
+	if agentPortError := setInteger("ANY_AI_CLI_REMOTE_AGENT_PORT", &document.Agent.Port); agentPortError != nil {
+		return agentPortError
+	}
+	setBoolean := func(key string, target *bool) error {
+		value := compat.Environment(key, "")
+		if value == "" {
+			return nil
+		}
+		parsed, parseError := strconv.ParseBool(value)
+		if parseError != nil {
+			switch strings.ToLower(value) {
+			case "yes", "on":
+				parsed = true
+			case "no", "off":
+				parsed = false
+			default:
+				return fmt.Errorf("%s must be a boolean", key)
+			}
+		}
+		*target = parsed
+		return nil
+	}
+	if parseError := setBoolean("ANY_AI_CLI_REMOTE_ENSURE_AGENT", &document.Agent.Ensure); parseError != nil {
+		return parseError
+	}
+	if parseError := setBoolean("ANY_AI_CLI_REMOTE_STOP_AGENT_ON_EXIT", &document.Agent.StopOnExit); parseError != nil {
+		return parseError
+	}
+	return nil
 }
 
 func (configuration Config) PairingURL(lanIP string) string {
@@ -184,19 +349,10 @@ func (configuration Config) PairingDeepLink(lanIP string) string {
 
 func defaultPortForScheme(scheme string) int {
 	if strings.EqualFold(scheme, "https") {
-		return 443
+		return standardHTTPSPort
 	}
-	return 80
+	return standardHTTPPort
 }
-
-func environmentInteger(primaryKey string, fallback int) int {
-	value, operationError := strconv.Atoi(compat.Environment(primaryKey, ""))
-	if operationError != nil || value == 0 {
-		return fallback
-	}
-	return value
-}
-
 func expandHome(path, home string) string {
 	if path == "~" {
 		return home
@@ -205,6 +361,18 @@ func expandHome(path, home string) string {
 		return filepath.Join(home, strings.TrimPrefix(path, "~/"))
 	}
 	return path
+}
+
+func canonicalConfigurationPath(path string, home string) (string, error) {
+	cleanPath := filepath.Clean(expandHome(strings.TrimSpace(path), home))
+	if !filepath.IsAbs(cleanPath) {
+		absolutePath, operationError := filepath.Abs(cleanPath)
+		if operationError != nil {
+			return "", fmt.Errorf("resolve configuration path: %w", operationError)
+		}
+		cleanPath = absolutePath
+	}
+	return filepath.Clean(cleanPath), nil
 }
 
 func loadOrCreateSecret(path string) (string, error) {
@@ -218,7 +386,7 @@ func loadOrCreateSecret(path string) (string, error) {
 			return "", fmt.Errorf("read secret: %w", readError)
 		}
 		value := strings.TrimSpace(string(data))
-		if len(value) < 16 {
+		if len(value) < minimumSecretCharacters {
 			return "", errors.New("secret file must contain at least 16 characters")
 		}
 		if permissionError := os.Chmod(path, 0o600); permissionError != nil {
@@ -232,7 +400,7 @@ func loadOrCreateSecret(path string) (string, error) {
 	if operationError := os.MkdirAll(filepath.Dir(path), 0700); operationError != nil {
 		return "", fmt.Errorf("create secret directory: %w", operationError)
 	}
-	bytes := make([]byte, 16)
+	bytes := make([]byte, generatedSecretRandomBytes)
 	if _, operationError := rand.Read(bytes); operationError != nil {
 		return "", fmt.Errorf("generate secret: %w", operationError)
 	}

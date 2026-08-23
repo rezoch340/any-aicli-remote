@@ -2,6 +2,7 @@ package factory
 
 import (
 	"flag"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -15,20 +16,73 @@ type OptionParser struct {
 	sessionsDirectory string
 	alwaysApprove     bool
 	leader            bool
+	unknown           map[string]string
+	parseError        error
+}
+
+func NewOptionParserWithValues(values map[string]string) *OptionParser {
+	parser := &OptionParser{unknown: map[string]string{}}
+	for optionName, optionValue := range values {
+		parser.unknown[optionName] = optionValue
+	}
+	parser.sessionsDirectory = values[SessionsDirectoryOption]
+	if value, present := values[AlwaysApproveOption]; present {
+		parser.alwaysApprove, parser.parseError = strconv.ParseBool(value)
+	}
+	if value, present := values[LeaderOption]; present {
+		parsedLeader, leaderError := strconv.ParseBool(value)
+		if parser.parseError == nil {
+			parser.leader, parser.parseError = parsedLeader, leaderError
+		}
+	}
+	return parser
 }
 
 func NewOptionParser() *OptionParser {
-	return &OptionParser{
-		sessionsDirectory: compat.Environment("ANY_AI_CLI_REMOTE_PROVIDER_SESSIONS_DIR", compat.Environment("ANY_AI_CLI_REMOTE_GROK_SESSIONS_DIR", "")),
-		alwaysApprove: compat.BooleanEnvironment(
-			"ANY_AI_CLI_REMOTE_PROVIDER_ALWAYS_APPROVE",
-			compat.BooleanEnvironment("ANY_AI_CLI_REMOTE_GROK_ALWAYS_APPROVE", false),
-		),
-		leader: compat.BooleanEnvironment(
-			"ANY_AI_CLI_REMOTE_PROVIDER_LEADER",
-			compat.BooleanEnvironment("ANY_AI_CLI_REMOTE_GROK_LEADER", false),
-		),
+	parser := &OptionParser{unknown: map[string]string{}}
+	_ = parser.ApplyEnvironment()
+	return parser
+}
+
+func (parser *OptionParser) ApplyEnvironment() error {
+	if parser.parseError != nil {
+		return fmt.Errorf("invalid provider option: %w", parser.parseError)
 	}
+	parser.sessionsDirectory = compat.Environment("ANY_AI_CLI_REMOTE_PROVIDER_SESSIONS_DIR", compat.Environment("ANY_AI_CLI_REMOTE_GROK_SESSIONS_DIR", parser.sessionsDirectory))
+	if operationError := applyBooleanEnvironment("ANY_AI_CLI_REMOTE_PROVIDER_ALWAYS_APPROVE", "ANY_AI_CLI_REMOTE_GROK_ALWAYS_APPROVE", &parser.alwaysApprove); operationError != nil {
+		return operationError
+	}
+	if operationError := applyBooleanEnvironment("ANY_AI_CLI_REMOTE_PROVIDER_LEADER", "ANY_AI_CLI_REMOTE_GROK_LEADER", &parser.leader); operationError != nil {
+		return operationError
+	}
+	return nil
+}
+
+func (parser *OptionParser) Validate() error {
+	if parser.parseError != nil {
+		return fmt.Errorf("invalid provider option: %w", parser.parseError)
+	}
+	return nil
+}
+
+func applyBooleanEnvironment(currentKey string, legacyKey string, target *bool) error {
+	value := compat.Environment(currentKey, compat.Environment(legacyKey, ""))
+	if value == "" {
+		return nil
+	}
+	parsed, operationError := strconv.ParseBool(value)
+	if operationError != nil {
+		switch strings.ToLower(value) {
+		case "yes", "on":
+			parsed = true
+		case "no", "off":
+			parsed = false
+		default:
+			return fmt.Errorf("%s must be a boolean", currentKey)
+		}
+	}
+	*target = parsed
+	return nil
 }
 
 func (parser *OptionParser) BindFlags(flagSet *flag.FlagSet, executablePath *string) {
@@ -45,10 +99,12 @@ func (parser *OptionParser) BindFlags(flagSet *flag.FlagSet, executablePath *str
 }
 
 func (parser *OptionParser) Values() map[string]string {
-	options := map[string]string{
-		AlwaysApproveOption: strconv.FormatBool(parser.alwaysApprove),
-		LeaderOption:        strconv.FormatBool(parser.leader),
+	options := map[string]string{}
+	for optionName, optionValue := range parser.unknown {
+		options[optionName] = optionValue
 	}
+	options[AlwaysApproveOption] = strconv.FormatBool(parser.alwaysApprove)
+	options[LeaderOption] = strconv.FormatBool(parser.leader)
 	if sessionsDirectory := strings.TrimSpace(parser.sessionsDirectory); sessionsDirectory != "" {
 		options[SessionsDirectoryOption] = sessionsDirectory
 	}

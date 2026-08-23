@@ -5,8 +5,6 @@ package factory
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -26,6 +24,8 @@ type Configuration struct {
 	ProviderID     string
 	ExecutablePath string
 	Options        map[string]string
+	HistoryPolicy  providerapi.HistoryPolicy
+	VoicePolicy    voice.Policy
 }
 
 type Components struct {
@@ -36,6 +36,12 @@ type Components struct {
 }
 
 func New(configuration Configuration) (Components, error) {
+	if operationError := configuration.HistoryPolicy.Validate(); operationError != nil {
+		return Components{}, operationError
+	}
+	if operationError := configuration.VoicePolicy.Validate(); operationError != nil {
+		return Components{}, operationError
+	}
 	providerID := strings.TrimSpace(configuration.ProviderID)
 	if providerID == "" {
 		providerID = DefaultProviderID
@@ -65,25 +71,21 @@ func newGrok(configuration Configuration) (Components, error) {
 		return Components{}, operationError
 	}
 	sessionsDirectory := strings.TrimSpace(configuration.Options[SessionsDirectoryOption])
-	if sessionsDirectory == "" {
-		homeDirectory, homeError := os.UserHomeDir()
-		if homeError != nil {
-			return Components{}, fmt.Errorf("resolve provider sessions directory: %w", homeError)
-		}
-		sessionsDirectory = filepath.Join(homeDirectory, ".grok", "sessions")
-	}
-	providerInstance := grok.New(grok.Config{
+	providerInstance, operationError := grok.New(grok.Config{
 		SessionsDirectory: sessionsDirectory,
 		ExecutablePath:    configuration.ExecutablePath,
 		AlwaysApprove:     alwaysApprove,
 		Leader:            leader,
+		HistoryPolicy:     configuration.HistoryPolicy,
 	})
-	return Components{
-		Catalog:    providerInstance,
-		Protocol:   providerInstance,
-		SkillRoots: providerInstance,
-		Voice:      grok.NewVoiceFromEnvironment(),
-	}, nil
+	if operationError != nil {
+		return Components{}, operationError
+	}
+	voiceService, operationError := grok.NewVoiceFromEnvironment(configuration.VoicePolicy)
+	if operationError != nil {
+		return Components{}, operationError
+	}
+	return Components{Catalog: providerInstance, Protocol: providerInstance, SkillRoots: providerInstance, Voice: voiceService}, nil
 }
 
 func booleanOption(options map[string]string, name string, fallback bool) (bool, error) {

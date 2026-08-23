@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-const chatTextCap = 120_000
-
 var historyKeep = map[string]struct{}{
 	"user_message_chunk":        {},
 	"agent_message_chunk":       {},
@@ -109,7 +107,7 @@ func parseUpdateLine(line string, live bool) Event {
 	}
 }
 
-func stripAndTrim(events []Event) []Event {
+func stripAndTrim(events []Event, chatTextMaxRunes int) []Event {
 	out := make([]Event, 0, len(events))
 	for _, event := range events {
 		clean := Event{}
@@ -119,12 +117,12 @@ func stripAndTrim(events []Event) []Event {
 			}
 			clean[key] = value
 		}
-		out = append(out, trimChatText(clean, chatTextCap))
+		out = append(out, trimChatText(clean, chatTextMaxRunes))
 	}
 	return out
 }
 
-func trimChatText(event Event, cap int) Event {
+func trimChatText(event Event, maximum int) Event {
 	params, valid := asMap(event["params"])
 	if !valid {
 		return event
@@ -138,11 +136,11 @@ func trimChatText(event Event, cap int) Event {
 		return event
 	}
 	text, valid := content["text"].(string)
-	if !valid || len(text) <= cap {
+	if !valid || len([]rune(text)) <= maximum {
 		return event
 	}
 	content2 := cloneMap(content)
-	content2["text"] = text[:cap] + "\n…[truncated for load speed]"
+	content2["text"] = string([]rune(text)[:maximum]) + "\n…[truncated for load speed]"
 	update2 := cloneMap(update)
 	update2["content"] = content2
 	params2 := cloneMap(params)

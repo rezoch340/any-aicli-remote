@@ -8,13 +8,10 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strconv"
-	"time"
-)
 
-const maxRequestBody = 8 * 1024 * 1024
+	"github.com/rezoch340/any-aicli-remote/backend/internal/atomicfile"
+	"strconv"
+)
 
 func (server *Server) routes() http.Handler {
 	mux := http.NewServeMux()
@@ -69,7 +66,7 @@ func (server *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/loops", server.handleLoopsStop)
 	mux.HandleFunc("POST /api/loops/stop", server.handleLoopsStop)
 	mux.HandleFunc("POST /api/effort", server.handleEffort)
-	return http.MaxBytesHandler(mux, maxRequestBody)
+	return http.MaxBytesHandler(mux, server.configuration.Canonical.Tuning.HTTP.MaxRequestBodyBytes)
 }
 
 func (server *Server) handleIndex(responseWriter http.ResponseWriter, _ *http.Request) {
@@ -116,7 +113,7 @@ func (server *Server) writeRuntimeConfig() error {
 	if errorValue != nil {
 		return errorValue
 	}
-	return os.WriteFile(filepath.Join(server.configuration.DataDirectory, "runtime-config.json"), data, 0o600)
+	return atomicfile.WritePrivate(runtimeConfigPath(server.configuration.DataDirectory), append(data, '\n'))
 }
 
 func (server *Server) handleConfig(responseWriter http.ResponseWriter, _ *http.Request) {
@@ -140,14 +137,18 @@ func (server *Server) handleHealth(responseWriter http.ResponseWriter, _ *http.R
 	writeJSON(responseWriter, http.StatusOK, server.healthPayload())
 }
 
+func (server *Server) deepHealthContext(request *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(request.Context(), server.configuration.Canonical.Tuning.HTTP.DeepHealthTimeout.Duration)
+}
+
 func (server *Server) handleHealthDeep(responseWriter http.ResponseWriter, request *http.Request) {
-	executionContext, cancel := context.WithTimeout(request.Context(), 6*time.Second)
+	executionContext, cancel := server.deepHealthContext(request)
 	defer cancel()
 	errorValue := server.hub.Ensure(executionContext)
 	valid := errorValue == nil && server.hub.AgentConnected()
 	detail := ""
 	if errorValue != nil {
-		detail = redactSecret(errorValue.Error(), server.configuration.AgentSecret, 200)
+		detail = redactSecret(errorValue.Error(), server.configuration.AgentSecret, server.configuration.Canonical.Tuning.HTTP.DeepHealthDetailMaxRunes)
 	}
 	writeJSON(responseWriter, http.StatusOK, map[string]any{
 		"ok":             valid,

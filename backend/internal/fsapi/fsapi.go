@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,20 +13,44 @@ import (
 	"unicode/utf8"
 )
 
-const (
-	MaxRead  int64 = 2_000_000
-	MaxWrite int   = 4_000_000
-)
+type Policy struct {
+	MaxReadBytes  int64
+	MaxWriteBytes int64
+	MaxListItems  int
+}
+
+func (policy Policy) Validate() error {
+	if policy.MaxReadBytes <= 0 {
+		return errors.New("filesystem maximum read bytes must be positive")
+	}
+	if policy.MaxReadBytes >= math.MaxInt64 {
+		return errors.New("filesystem maximum read bytes must leave room for sentinel")
+	}
+	if policy.MaxListItems <= 0 {
+		return errors.New("filesystem maximum list items must be positive")
+	}
+	if policy.MaxListItems >= int(^uint(0)>>1) {
+		return errors.New("filesystem maximum list items must leave room for sentinel")
+	}
+	if policy.MaxWriteBytes <= 0 {
+		return errors.New("filesystem maximum write bytes must be positive")
+	}
+	if policy.MaxWriteBytes >= math.MaxInt64 {
+		return errors.New("filesystem maximum write bytes must leave room for sentinel")
+	}
+	return nil
+}
 
 var (
-	PathRequiredError     = errors.New("path required")
-	OutsideWorkspaceError = errors.New("path outside workspace")
-	WorkspaceChangedError = errors.New("workspace root changed")
-	NotDirectoryError     = errors.New("not a directory")
-	NotFileError          = errors.New("not a file")
-	FileTooLargeError     = errors.New("file too large")
-	ContentRequiredError  = errors.New("content required")
-	ContentTooLargeError  = errors.New("content too large")
+	PathRequiredError             = errors.New("path required")
+	OutsideWorkspaceError         = errors.New("path outside workspace")
+	WorkspaceChangedError         = errors.New("workspace root changed")
+	NotDirectoryError             = errors.New("not a directory")
+	NotFileError                  = errors.New("not a file")
+	FileTooLargeError             = errors.New("file too large")
+	ContentRequiredError          = errors.New("content required")
+	ContentTooLargeError          = errors.New("content too large")
+	DirectoryListingTooLargeError = errors.New("directory listing too large")
 )
 
 var skippedDirectories = map[string]struct{}{
@@ -50,6 +75,7 @@ type Service struct {
 	root           string
 	rootFilesystem *os.Root
 	rootIdentity   *RootIdentity
+	policy         Policy
 }
 
 type RootInfo struct {
@@ -102,8 +128,11 @@ type WriteResult struct {
 	Size         int64  `json:"size"`
 }
 
-func New(root string) (*Service, error) {
-	service := &Service{}
+func New(root string, policy Policy) (*Service, error) {
+	if validationError := policy.Validate(); validationError != nil {
+		return nil, validationError
+	}
+	service := &Service{policy: policy}
 	if _, operationError := service.SetRoot(root); operationError != nil {
 		return nil, operationError
 	}
@@ -112,12 +141,15 @@ func New(root string) (*Service, error) {
 
 // NewPinned opens a filesystem service for an already-bound workspace. The
 // opened os.Root and the path are checked against the original identity.
-func NewPinned(identity *RootIdentity) (*Service, error) {
+func NewPinned(identity *RootIdentity, policy Policy) (*Service, error) {
+	if validationError := policy.Validate(); validationError != nil {
+		return nil, validationError
+	}
 	rootFilesystem, operationError := identity.OpenRoot()
 	if operationError != nil {
 		return nil, operationError
 	}
-	return &Service{root: identity.Path(), rootFilesystem: rootFilesystem, rootIdentity: identity}, nil
+	return &Service{root: identity.Path(), rootFilesystem: rootFilesystem, rootIdentity: identity, policy: policy}, nil
 }
 
 func (service *Service) Close() error {
@@ -284,9 +316,12 @@ func (service *Service) List(raw string) (Listing, error) {
 	if !info.IsDir() {
 		return Listing{}, NotDirectoryError
 	}
-	entries, operationError := file.ReadDir(-1)
-	if operationError != nil {
+	entries, operationError := file.ReadDir(service.policy.MaxListItems + 1)
+	if operationError != nil && !errors.Is(operationError, io.EOF) {
 		return Listing{}, operationError
+	}
+	if len(entries) > service.policy.MaxListItems {
+		return Listing{}, DirectoryListingTooLargeError
 	}
 	sort.Slice(entries, func(leftIndex, rightIndex int) bool {
 		leftItem, ierr := entries[leftIndex].Info()
@@ -367,7 +402,7 @@ func (service *Service) Read(raw string) (ReadResult, error) {
 	if !info.Mode().IsRegular() {
 		return ReadResult{}, NotFileError
 	}
-	if info.Size() > MaxRead {
+	if info.Size() > service.policy.MaxReadBytes {
 		return ReadResult{}, FileTooLargeError
 	}
 	result := ReadResult{
@@ -385,11 +420,11 @@ func (service *Service) Read(raw string) (ReadResult, error) {
 		return ReadResult{}, normalizeRootError(operationError)
 	}
 	defer file.Close()
-	data, operationError := io.ReadAll(io.LimitReader(file, MaxRead+1))
+	data, operationError := io.ReadAll(io.LimitReader(file, service.policy.MaxReadBytes+1))
 	if operationError != nil {
 		return ReadResult{}, operationError
 	}
-	if int64(len(data)) > MaxRead {
+	if int64(len(data)) > service.policy.MaxReadBytes {
 		return ReadResult{}, FileTooLargeError
 	}
 	result.Text = true
@@ -403,7 +438,7 @@ func (service *Service) Write(raw, content string) (WriteResult, error) {
 		return WriteResult{}, PathRequiredError
 	}
 	data := []byte(content)
-	if len(data) > MaxWrite {
+	if int64(len(data)) > service.policy.MaxWriteBytes {
 		return WriteResult{}, ContentTooLargeError
 	}
 	service.mutex.RLock()

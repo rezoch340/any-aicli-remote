@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,10 +24,51 @@ var (
 	PathOutsideWorkspaceError = errors.New("path outside workspace")
 )
 
+type Policy struct {
+	CommandTimeout        time.Duration
+	DiffTimeout           time.Duration
+	DirtyFileLimit        int
+	DiffRuneLimit         int
+	LogDefaultLimit       int
+	LogMaxLimit           int
+	ContextFileReadBytes  int64
+	ContextPreviewRunes   int
+	CommandOutputMaxBytes int64
+}
+
+func (policy Policy) Validate() error {
+	switch {
+	case policy.CommandTimeout <= 0:
+		return errors.New("git command timeout must be positive")
+	case policy.DiffTimeout <= 0:
+		return errors.New("git diff timeout must be positive")
+	case policy.DirtyFileLimit <= 0:
+		return errors.New("git dirty file limit must be positive")
+	case policy.DiffRuneLimit <= 0:
+		return errors.New("git diff rune limit must be positive")
+	case policy.LogDefaultLimit <= 0:
+		return errors.New("git log default limit must be positive")
+	case policy.LogMaxLimit < policy.LogDefaultLimit:
+		return errors.New("git log maximum limit must not be below default")
+	case policy.ContextFileReadBytes <= 0:
+		return errors.New("git context file read bytes must be positive")
+	case policy.ContextFileReadBytes >= math.MaxInt64:
+		return errors.New("git context file read bytes must leave room for sentinel")
+	case policy.ContextPreviewRunes <= 0:
+		return errors.New("git context preview runes must be positive")
+	case policy.CommandOutputMaxBytes <= 0:
+		return errors.New("git command output max bytes must be positive")
+	case policy.CommandOutputMaxBytes >= math.MaxInt64:
+		return errors.New("git command output max bytes must leave room for sentinel")
+	}
+	return nil
+}
+
 type Service struct {
 	workspace    func() string
 	rootIdentity *fsapi.RootIdentity
 	gitPath      string
+	policy       Policy
 }
 
 type DirtyFile struct {
@@ -81,22 +123,34 @@ type ProjectContext struct {
 	Files  []ContextFile `json:"files"`
 }
 
-func New(workspace func() string) *Service {
+func New(workspace func() string, policy Policy) (*Service, error) {
+	if validationError := policy.Validate(); validationError != nil {
+		return nil, validationError
+	}
 	gitPath, _ := exec.LookPath("git")
-	return &Service{workspace: workspace, gitPath: gitPath}
+	return &Service{workspace: workspace, gitPath: gitPath, policy: policy}, nil
 }
 
-func NewWithGit(workspace func() string, gitPath string) *Service {
-	return &Service{workspace: workspace, gitPath: gitPath}
+func NewWithGit(workspace func() string, gitPath string, policy Policy) (*Service, error) {
+	if validationError := policy.Validate(); validationError != nil {
+		return nil, validationError
+	}
+	return &Service{workspace: workspace, gitPath: gitPath, policy: policy}, nil
 }
 
-func NewPinned(rootIdentity *fsapi.RootIdentity) *Service {
+func NewPinned(rootIdentity *fsapi.RootIdentity, policy Policy) (*Service, error) {
+	if validationError := policy.Validate(); validationError != nil {
+		return nil, validationError
+	}
 	gitPath, _ := exec.LookPath("git")
-	return &Service{rootIdentity: rootIdentity, gitPath: gitPath}
+	return &Service{rootIdentity: rootIdentity, gitPath: gitPath, policy: policy}, nil
 }
 
-func NewWithPinnedGit(rootIdentity *fsapi.RootIdentity, gitPath string) *Service {
-	return &Service{rootIdentity: rootIdentity, gitPath: gitPath}
+func NewWithPinnedGit(rootIdentity *fsapi.RootIdentity, gitPath string, policy Policy) (*Service, error) {
+	if validationError := policy.Validate(); validationError != nil {
+		return nil, validationError
+	}
+	return &Service{rootIdentity: rootIdentity, gitPath: gitPath, policy: policy}, nil
 }
 
 func (service *Service) Status(operationContext context.Context) (StatusResult, error) {
@@ -105,7 +159,7 @@ func (service *Service) Status(operationContext context.Context) (StatusResult, 
 		return StatusResult{}, operationError
 	}
 	result := StatusResult{OK: true, Root: root, Files: []DirtyFile{}}
-	inside, operationError := service.run(operationContext, 12*time.Second, root, "rev-parse", "--is-inside-work-tree")
+	inside, operationError := service.run(operationContext, service.policy.CommandTimeout, root, "rev-parse", "--is-inside-work-tree")
 	if operationError != nil {
 		return StatusResult{}, operationError
 	}
@@ -114,15 +168,15 @@ func (service *Service) Status(operationContext context.Context) (StatusResult, 
 	}
 	result.Git = true
 
-	if branch, runError := service.run(operationContext, 12*time.Second, root, "rev-parse", "--abbrev-ref", "HEAD"); runError == nil && branch.code == 0 {
+	if branch, runError := service.run(operationContext, service.policy.CommandTimeout, root, "rev-parse", "--abbrev-ref", "HEAD"); runError == nil && branch.code == 0 {
 		result.Branch = strings.TrimSpace(branch.stdout)
 	} else {
 		result.Branch = "?"
 	}
-	if commitHash, runError := service.run(operationContext, 12*time.Second, root, "rev-parse", "--short", "HEAD"); runError == nil && commitHash.code == 0 {
+	if commitHash, runError := service.run(operationContext, service.policy.CommandTimeout, root, "rev-parse", "--short", "HEAD"); runError == nil && commitHash.code == 0 {
 		result.CommitHash = strings.TrimSpace(commitHash.stdout)
 	}
-	status, runError := service.run(operationContext, 12*time.Second, root, "status", "--porcelain", "-b")
+	status, runError := service.run(operationContext, service.policy.CommandTimeout, root, "status", "--porcelain", "-b")
 	if runError != nil {
 		return StatusResult{}, runError
 	}
@@ -133,7 +187,7 @@ func (service *Service) Status(operationContext context.Context) (StatusResult, 
 	}
 	result.Dirty = len(lines)
 	for _, line := range lines {
-		if len(result.Files) >= 80 {
+		if len(result.Files) >= service.policy.DirtyFileLimit {
 			break
 		}
 		if strings.TrimSpace(line) == "" {
@@ -170,7 +224,7 @@ func (service *Service) Diff(operationContext context.Context, path string, stag
 	if path != "" {
 		arguments = append(arguments, "--", path)
 	}
-	output, operationError := service.run(operationContext, 20*time.Second, root, arguments...)
+	output, operationError := service.run(operationContext, service.policy.DiffTimeout, root, arguments...)
 	if operationError != nil {
 		return DiffResult{}, operationError
 	}
@@ -178,7 +232,7 @@ func (service *Service) Diff(operationContext context.Context, path string, stag
 		OK:     true,
 		Path:   path,
 		Staged: staged,
-		Diff:   truncateRunes(output.stdout, 200_000),
+		Diff:   truncateRunes(output.stdout, service.policy.DiffRuneLimit),
 		Code:   output.code,
 	}, nil
 }
@@ -189,12 +243,12 @@ func (service *Service) Log(operationContext context.Context, count int) (LogRes
 		return LogResult{}, operationError
 	}
 	if count < 1 {
-		count = 1
+		count = service.policy.LogDefaultLimit
 	}
-	if count > 30 {
-		count = 30
+	if count > service.policy.LogMaxLimit {
+		count = service.policy.LogMaxLimit
 	}
-	output, operationError := service.run(operationContext, 12*time.Second, root, "log", "-"+strconv.Itoa(count), "--pretty=format:%h%x09%ad%x09%s", "--date=short")
+	output, operationError := service.run(operationContext, service.policy.CommandTimeout, root, "log", "-"+strconv.Itoa(count), "--pretty=format:%h%x09%ad%x09%s", "--date=short")
 	if operationError != nil {
 		return LogResult{}, operationError
 	}
@@ -237,9 +291,9 @@ func (service *Service) Project(operationContext context.Context) (ProjectContex
 			_ = file.Close()
 			continue
 		}
-		data, readError := io.ReadAll(io.LimitReader(file, 16_001))
+		data, readError := io.ReadAll(io.LimitReader(file, service.policy.ContextFileReadBytes+1))
 		_ = file.Close()
-		if readError != nil {
+		if readError != nil || int64(len(data)) > service.policy.ContextFileReadBytes {
 			continue
 		}
 		preview := decodeUTF8(data)
@@ -247,10 +301,10 @@ func (service *Service) Project(operationContext context.Context) (ProjectContex
 			Name:         name,
 			RelativePath: name,
 			Size:         info.Size(),
-			Preview:      truncateRunes(preview, 4_000),
+			Preview:      truncateRunes(preview, service.policy.ContextPreviewRunes),
 		})
 	}
-	if branch, runError := service.run(operationContext, 12*time.Second, root, "rev-parse", "--abbrev-ref", "HEAD"); runError == nil && branch.code == 0 {
+	if branch, runError := service.run(operationContext, service.policy.CommandTimeout, root, "rev-parse", "--abbrev-ref", "HEAD"); runError == nil && branch.code == 0 {
 		name := strings.TrimSpace(branch.stdout)
 		result.Branch = &name
 	}
@@ -260,6 +314,20 @@ func (service *Service) Project(operationContext context.Context) (ProjectContex
 type commandResult struct {
 	stdout string
 	code   int
+}
+
+type boundedOutputWriter struct {
+	limit int64
+	data  []byte
+}
+
+func (writer *boundedOutputWriter) Write(data []byte) (int, error) {
+	remaining := writer.limit - int64(len(writer.data))
+	if remaining > 0 {
+		copyLength := min(int64(len(data)), remaining)
+		writer.data = append(writer.data, data[:int(copyLength)]...)
+	}
+	return len(data), nil
 }
 
 func (service *Service) run(operationContext context.Context, timeout time.Duration, root string, arguments ...string) (commandResult, error) {
@@ -275,16 +343,18 @@ func (service *Service) run(operationContext context.Context, timeout time.Durat
 			return commandResult{}, WorkspaceUnavailableError
 		}
 	}
-	stdout, operationError := command.Output()
+	stdoutWriter := &boundedOutputWriter{limit: service.policy.CommandOutputMaxBytes}
+	command.Stdout = stdoutWriter
+	operationError := command.Run()
 	if runContext.Err() != nil {
 		return commandResult{}, runContext.Err()
 	}
 	if operationError == nil {
-		return commandResult{stdout: decodeUTF8(stdout), code: 0}, nil
+		return commandResult{stdout: decodeUTF8(stdoutWriter.data), code: 0}, nil
 	}
 	var exitError *exec.ExitError
 	if errors.As(operationError, &exitError) {
-		return commandResult{stdout: decodeUTF8(stdout), code: exitError.ExitCode()}, nil
+		return commandResult{stdout: decodeUTF8(stdoutWriter.data), code: exitError.ExitCode()}, nil
 	}
 	return commandResult{}, operationError
 }

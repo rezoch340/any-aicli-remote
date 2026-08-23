@@ -19,7 +19,7 @@ func (server *Server) filesystemForSession(operationContext context.Context, pro
 	if operationError != nil {
 		return nil, operationError
 	}
-	return fsapi.NewPinned(rootIdentity)
+	return fsapi.NewPinned(rootIdentity, server.filesystemPolicy)
 }
 
 func (server *Server) gitForSession(operationContext context.Context, providerID, sessionID string) (*gitapi.Service, error) {
@@ -27,7 +27,7 @@ func (server *Server) gitForSession(operationContext context.Context, providerID
 	if operationError != nil {
 		return nil, operationError
 	}
-	return gitapi.NewPinned(rootIdentity), nil
+	return gitapi.NewPinned(rootIdentity, server.gitPolicy)
 }
 
 func writeWorkspaceError(responseWriter http.ResponseWriter, operationError error) {

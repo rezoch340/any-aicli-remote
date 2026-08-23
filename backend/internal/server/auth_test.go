@@ -209,7 +209,7 @@ func serveAuth(secret, target, remote string, headers http.Header, next http.Han
 		}
 	}
 	response := httptest.NewRecorder()
-	authMiddleware(secret, next).ServeHTTP(response, request)
+	authMiddleware(secret, 30*24*60*60, next).ServeHTTP(response, request)
 	return response
 }
 

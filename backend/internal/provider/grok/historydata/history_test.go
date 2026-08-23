@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
 
 func TestReadSessionUpdatesFromRootChatOnlyCoalescesAndPaginatesBefore(testContext *testing.T) {
@@ -116,13 +119,13 @@ func TestReadSessionUpdatesFromRootLiveSinceAndIncompleteTail(testContext *testi
 func TestReadSessionUpdatesFromRootTrimsLongChatText(testContext *testing.T) {
 	directory := testContext.TempDir()
 	path := filepath.Join(directory, "updates.jsonl")
-	appendLines(testContext, path, updateLine("s", "user_message_chunk", strings.Repeat("x", chatTextCap+10), nil))
-	events, _ := readSessionUpdates(testContext, directory, ReadOptions{Limit: 1, MaxBytes: int64(chatTextCap + 4096), ChatOnly: true})
+	appendLines(testContext, path, updateLine("s", "user_message_chunk", strings.Repeat("x", 120000+10), nil))
+	events, _ := readSessionUpdates(testContext, directory, ReadOptions{Limit: 1, MaxBytes: int64(120000 + 4096), ChatOnly: true})
 	if len(events) != 1 {
 		testContext.Fatalf("events=%#v", events)
 	}
 	text := textAt(testContext, events[0])
-	if len(text) <= chatTextCap || !strings.Contains(text, "truncated for load speed") {
+	if len(text) <= 120000 || !strings.Contains(text, "truncated for load speed") {
 		testContext.Fatalf("text was not trimmed: len=%d suffix=%q", len(text), text[len(text)-40:])
 	}
 }
@@ -161,7 +164,11 @@ func readSessionUpdates(testContext *testing.T, directory string, options ReadOp
 		testContext.Fatal(operationError)
 	}
 	defer sessionRoot.Close()
-	return ReadSessionUpdatesFromRoot(sessionRoot, filepath.Join(directory, "updates.jsonl"), options)
+	events, metadata, operationError := ReadSessionUpdatesFromRoot(sessionRoot, filepath.Join(directory, "updates.jsonl"), testHistoryPolicy(), options)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	return events, metadata
 }
 
 func appendLines(testContext *testing.T, path string, lines ...string) {
@@ -214,4 +221,98 @@ func updateAt(testContext *testing.T, event Event) map[string]any {
 		testContext.Fatalf("missing update: %#v", event)
 	}
 	return update
+}
+
+func testHistoryPolicy() providerapi.HistoryPolicy {
+	return providerapi.HistoryPolicy{DefaultLimit: 100, LiveLimit: 400, MinLimit: 20, MaxLimit: 4000, DefaultMaxBytes: 400000, LiveMaxBytes: 512000, BeforeMaxBytes: 1200000, MinMaxBytes: 64000, MaxMaxBytes: 12000000, AdapterEventLimit: 1600, AdapterReadBytes: 8000000, TitleBatchLimit: 250, ChatTextMaxRunes: 120000, MessageScanInitialBytes: 64 * 1024, MessageScanMaxBytes: 8 * 1024 * 1024, MetadataTitleMaxRunes: 80, MetadataSummaryMaxRunes: 160, RenameTitleMaxRunes: 160}
+}
+
+func TestReadSessionUpdatesRejectsZeroPolicy(testContext *testing.T) {
+	directory := testContext.TempDir()
+	appendLines(testContext, filepath.Join(directory, "updates.jsonl"), updateLine("one", "user_message_chunk", "hello", nil))
+	sessionRoot, operationError := os.OpenRoot(directory)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	defer sessionRoot.Close()
+	if _, _, operationError = ReadSessionUpdatesFromRoot(sessionRoot, filepath.Join(directory, "updates.jsonl"), providerapi.HistoryPolicy{}, ReadOptions{}); operationError == nil {
+		testContext.Fatal("expected policy error")
+	}
+}
+
+func TestReadSessionUpdatesUsesPolicyAndLiveWindow(testContext *testing.T) {
+	directory := testContext.TempDir()
+	path := filepath.Join(directory, "updates.jsonl")
+	appendLines(testContext, path, updateLine("one", "user_message_chunk", strings.Repeat("old", 80), nil), updateLine("one", "agent_message_chunk", strings.Repeat("new", 80), nil))
+	policy := testHistoryPolicy()
+	policy.AdapterEventLimit = 1
+	policy.AdapterReadBytes = 500
+	sessionRoot, operationError := os.OpenRoot(directory)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	defer sessionRoot.Close()
+	events, metadata, operationError := ReadSessionUpdatesFromRoot(sessionRoot, path, policy, ReadOptions{})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if len(events) != 1 || eventText(events[0]) != strings.Repeat("new", 80) || metadata["window_start"].(int64) <= 0 {
+		testContext.Fatalf("events=%#v meta=%#v", events, metadata)
+	}
+	events, metadata, operationError = ReadSessionUpdatesFromRoot(sessionRoot, path, policy, ReadOptions{Live: true, MaxBytes: 500})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if len(events) != 1 || metadata["window_start"].(int64) <= 0 {
+		testContext.Fatalf("events=%#v meta=%#v", events, metadata)
+	}
+}
+
+func eventText(event Event) string {
+	params, _ := event["params"].(map[string]any)
+	update, _ := params["update"].(map[string]any)
+	content, _ := update["content"].(map[string]any)
+	value, _ := content["text"].(string)
+	return value
+}
+
+func TestChatTextPolicyTruncatesUnicodeAcrossPaths(testContext *testing.T) {
+	directory := testContext.TempDir()
+	path := filepath.Join(directory, "updates.jsonl")
+	appendLines(testContext, path, updateLine("s", "user_message_chunk", "甲乙丙丁戊", nil))
+	policy := testHistoryPolicy()
+	policy.ChatTextMaxRunes = 3
+	root, errorValue := os.OpenRoot(directory)
+	if errorValue != nil {
+		testContext.Fatal(errorValue)
+	}
+	defer root.Close()
+	for _, options := range []ReadOptions{{Limit: 1, MaxBytes: 4096}, {Limit: 1, MaxBytes: 4096, ChatOnly: true}, {Limit: 1, MaxBytes: 4096, Live: true}} {
+		events, _, errorValue := ReadSessionUpdatesFromRoot(root, path, policy, options)
+		if errorValue != nil || len(events) != 1 {
+			testContext.Fatalf("events=%#v err=%v", events, errorValue)
+		}
+		text := textAt(testContext, events[0])
+		if text != "甲乙丙\n…[truncated for load speed]" || !utf8.ValidString(text) {
+			testContext.Fatalf("text=%q", text)
+		}
+	}
+}
+
+func TestReadLiveSinceCannotBypassMaxBytes(testingContext *testing.T) {
+	directory := testingContext.TempDir()
+	path := filepath.Join(directory, "updates.jsonl")
+	appendLines(testingContext, path,
+		updateLine("session", "user_message_chunk", strings.Repeat("old", 80), nil),
+		updateLine("session", "agent_message_chunk", "new", nil),
+	)
+	events, metadata := readSessionUpdates(testingContext, directory, ReadOptions{Live: true, SinceBytes: 1, Limit: 10, MaxBytes: 128})
+	if metadata["window_start"].(int64) < metadata["size"].(int64)-128 {
+		testingContext.Fatalf("unclamped metadata=%#v", metadata)
+	}
+	for _, event := range events {
+		if textAt(testingContext, event) == strings.Repeat("old", 80) {
+			testingContext.Fatalf("old event bypassed cap: %#v", events)
+		}
+	}
 }

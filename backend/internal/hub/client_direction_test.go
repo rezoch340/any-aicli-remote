@@ -78,10 +78,13 @@ func TestCallRPCTerminalRequestRejectedBeforeEnsure(testInstance *testing.T) {
 	marker := filepath.Join(workspace, "api-marker")
 	var ensureCalls atomic.Int32
 	providerInstance := &testProvider{workingDirectory: workspace, sessionDirectories: map[string]string{}}
-	hubInstance := New("ws://127.0.0.1:1", providerInstance, providerInstance, func(context.Context) error {
+	hubInstance, newError := New("ws://127.0.0.1:1", providerInstance, providerInstance, func(context.Context) error {
 		ensureCalls.Add(1)
 		return nil
-	}, nil)
+	}, testHubPolicy(), nil)
+	if newError != nil {
+		testInstance.Fatal(newError)
+	}
 	defer hubInstance.Close()
 	_, operationError := hubInstance.CallRPC(context.Background(), "terminal/create", map[string]any{"sessionId": "test-session", "command": "printf compromised > api-marker", "cwd": workspace})
 	if operationError == nil {

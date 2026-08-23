@@ -14,13 +14,13 @@ import (
 	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
 
-const maxMessageSize = 16 * 1024 * 1024
-
 type clientConnection struct {
-	connection   *websocket.Conn
-	write        sync.Mutex
-	closed       atomic.Bool
-	closedSignal chan struct{}
+	connection          *websocket.Conn
+	write               sync.Mutex
+	closed              atomic.Bool
+	closedSignal        chan struct{}
+	writeTimeout        time.Duration
+	controlWriteTimeout time.Duration
 }
 
 func (clientConnectionInstance *clientConnection) send(data []byte) error {
@@ -29,7 +29,7 @@ func (clientConnectionInstance *clientConnection) send(data []byte) error {
 	}
 	clientConnectionInstance.write.Lock()
 	defer clientConnectionInstance.write.Unlock()
-	_ = clientConnectionInstance.connection.SetWriteDeadline(time.Now().Add(20 * time.Second))
+	_ = clientConnectionInstance.connection.SetWriteDeadline(time.Now().Add(clientConnectionInstance.writeTimeout))
 	return clientConnectionInstance.connection.WriteMessage(websocket.TextMessage, data)
 }
 
@@ -46,7 +46,7 @@ func (clientConnectionInstance *clientConnection) sendControl(messageType int, p
 	}
 	clientConnectionInstance.write.Lock()
 	defer clientConnectionInstance.write.Unlock()
-	return clientConnectionInstance.connection.WriteControl(messageType, payload, time.Now().Add(5*time.Second))
+	return clientConnectionInstance.connection.WriteControl(messageType, payload, time.Now().Add(clientConnectionInstance.controlWriteTimeout))
 }
 
 func (hubInstance *Hub) HandleWebSocket(responseWriter http.ResponseWriter, request *http.Request) {
@@ -59,8 +59,8 @@ func (hubInstance *Hub) HandleWebSocket(responseWriter http.ResponseWriter, requ
 		hubInstance.logger.Warn("client websocket upgrade failed", "error", operationError)
 		return
 	}
-	connection.SetReadLimit(maxMessageSize)
-	client := &clientConnection{connection: connection, closedSignal: make(chan struct{})}
+	connection.SetReadLimit(hubInstance.policy.MaxMessageBytes)
+	client := &clientConnection{connection: connection, closedSignal: make(chan struct{}), writeTimeout: hubInstance.policy.WriteTimeout, controlWriteTimeout: hubInstance.policy.ControlWriteTimeout}
 	hubInstance.stateMutex.Lock()
 	if hubInstance.closed.Load() {
 		hubInstance.stateMutex.Unlock()
@@ -85,7 +85,7 @@ func (hubInstance *Hub) HandleWebSocket(responseWriter http.ResponseWriter, requ
 	})
 	go hubInstance.keepClientAlive(client)
 
-	operationContext, cancel := context.WithTimeout(request.Context(), 15*time.Second)
+	operationContext, cancel := context.WithTimeout(request.Context(), hubInstance.policy.ClientConnectEnsure)
 	_ = hubInstance.Ensure(operationContext)
 	cancel()
 
@@ -142,7 +142,7 @@ func (hubInstance *Hub) Ensure(operationContext context.Context) error {
 	}
 
 	var last error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < hubInstance.policy.DialAttempts; attempt++ {
 		if operationError := operationContext.Err(); operationError != nil {
 			return operationError
 		}
@@ -160,10 +160,10 @@ func (hubInstance *Hub) Ensure(operationContext context.Context) error {
 		if hubInstance.closed.Load() {
 			return errors.New("hub closed")
 		}
-		dialer := websocket.Dialer{HandshakeTimeout: 8 * time.Second, EnableCompression: true}
+		dialer := websocket.Dialer{HandshakeTimeout: hubInstance.policy.DialHandshake, EnableCompression: true}
 		connection, _, operationError := dialer.DialContext(operationContext, hubInstance.agentURL, nil)
 		if operationError == nil {
-			connection.SetReadLimit(maxMessageSize)
+			connection.SetReadLimit(hubInstance.policy.MaxMessageBytes)
 			agentGeneration, agentContext, published := hubInstance.publishAgent(connection)
 			if !published {
 				_ = connection.Close()
@@ -181,7 +181,7 @@ func (hubInstance *Hub) Ensure(operationContext context.Context) error {
 		select {
 		case <-operationContext.Done():
 			return operationContext.Err()
-		case <-time.After(time.Duration(attempt+1) * 250 * time.Millisecond):
+		case <-time.After(time.Duration(attempt+1) * hubInstance.policy.RetryDelay):
 		}
 	}
 	if last == nil {
@@ -241,7 +241,7 @@ func (hubInstance *Hub) sendAgent(raw []byte) error {
 	}
 	hubInstance.agentWriteMutex.Lock()
 	defer hubInstance.agentWriteMutex.Unlock()
-	_ = connection.SetWriteDeadline(time.Now().Add(20 * time.Second))
+	_ = connection.SetWriteDeadline(time.Now().Add(hubInstance.policy.WriteTimeout))
 	if operationError := connection.WriteMessage(websocket.TextMessage, raw); operationError != nil {
 		return fmt.Errorf("send agent: %w", operationError)
 	}
@@ -258,7 +258,7 @@ func (hubInstance *Hub) sendAgentForGeneration(agentGeneration uint64, raw []byt
 	}
 	hubInstance.agentWriteMutex.Lock()
 	defer hubInstance.agentWriteMutex.Unlock()
-	_ = connection.SetWriteDeadline(time.Now().Add(20 * time.Second))
+	_ = connection.SetWriteDeadline(time.Now().Add(hubInstance.policy.WriteTimeout))
 	if operationError := connection.WriteMessage(websocket.TextMessage, raw); operationError != nil {
 		return fmt.Errorf("send agent generation %d: %w", agentGeneration, operationError)
 	}

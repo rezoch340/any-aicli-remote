@@ -92,13 +92,9 @@ func (server *Server) handleSessionHistory(responseWriter http.ResponseWriter, r
 	query := request.URL.Query()
 	sessionID := firstNonEmpty(query.Get("sessionId"), query.Get("id"))
 	live := parseBool(query.Get("live"))
-	defaultLimit := 100
-	if live {
-		defaultLimit = 400
-	}
 	limit := 0
 	if query.Has("limit") {
-		limit = intQuery(query.Get("limit"), defaultLimit)
+		limit = intQuery(query.Get("limit"), 0)
 	}
 	since := int64Query(firstNonEmpty(query.Get("since"), query.Get("since_bytes")), 0)
 	var before *int64
@@ -110,11 +106,7 @@ func (server *Server) handleSessionHistory(responseWriter http.ResponseWriter, r
 	}
 	maxBytes := int64(0)
 	if query.Has("max_bytes") {
-		fallback := int64(400_000)
-		if live {
-			fallback = 512_000
-		}
-		maxBytes = int64Query(query.Get("max_bytes"), fallback)
+		maxBytes = int64Query(query.Get("max_bytes"), 0)
 	}
 	result, errorValue := server.session.History(request.Context(), sessionapi.HistoryQuery{
 		ProviderID:  query.Get("providerId"),
@@ -142,7 +134,9 @@ func (server *Server) handleSessionHistory(responseWriter http.ResponseWriter, r
 
 func (server *Server) handleSessionTitles(responseWriter http.ResponseWriter, request *http.Request) {
 	var body map[string]any
-	decodeLooseJSON(request, &body)
+	if !server.decodeLooseJSON(responseWriter, request, &body) {
+		return
+	}
 	raw := body["ids"]
 	if !truthyValue(raw) {
 		raw = body["sessionIds"]
@@ -185,7 +179,9 @@ func (server *Server) handleSessionArchivedGet(responseWriter http.ResponseWrite
 
 func (server *Server) handleSessionArchivedSet(responseWriter http.ResponseWriter, request *http.Request) {
 	var body map[string]any
-	decodeLooseJSON(request, &body)
+	if !server.decodeLooseJSON(responseWriter, request, &body) {
+		return
+	}
 	archiveRequest := sessionapi.SetArchivedRequest{
 		ID:        stringValue(body["id"]),
 		SessionID: stringValue(body["sessionId"]),
@@ -214,7 +210,7 @@ func (server *Server) handleSessionArchivedSet(responseWriter http.ResponseWrite
 
 func (server *Server) handleSessionRename(responseWriter http.ResponseWriter, request *http.Request) {
 	var renameRequest sessionapi.RenameRequest
-	if errorValue := decodeJSON(responseWriter, request, &renameRequest, false); errorValue != nil {
+	if errorValue := server.decodeJSON(responseWriter, request, &renameRequest, false); errorValue != nil {
 		return
 	}
 	result, errorValue := server.session.Rename(request.Context(), renameRequest)

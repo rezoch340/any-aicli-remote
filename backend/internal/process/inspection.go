@@ -204,7 +204,10 @@ func verifyProcessIdentity(identity ProcessIdentity, operations Operations) (boo
 
 // KillProcess verifies the immutable identity before every signal so PID reuse
 // cannot turn a managed-agent shutdown into a signal to an unrelated process.
-func KillProcess(identity ProcessIdentity, gracePeriod time.Duration) error {
+func KillProcess(identity ProcessIdentity, policy LifecyclePolicy) error {
+	if policyError := policy.Validate(); policyError != nil {
+		return policyError
+	}
 	identityOperations := Operations{CommandLine: CommandLine, ProcessAlive: ProcessAlive, ProcessStart: ProcessStart}
 	identityMatches, verificationError := verifyProcessIdentity(identity, identityOperations)
 	if verificationError != nil || !identityMatches {
@@ -219,7 +222,7 @@ func KillProcess(identity ProcessIdentity, gracePeriod time.Duration) error {
 		}
 		return signalError
 	}
-	deadline := time.Now().Add(gracePeriod)
+	deadline := time.Now().Add(policy.KillGrace)
 	for time.Now().Before(deadline) {
 		identityMatches, verificationError = verifyProcessIdentity(identity, identityOperations)
 		if verificationError != nil {
@@ -228,7 +231,7 @@ func KillProcess(identity ProcessIdentity, gracePeriod time.Duration) error {
 		if !identityMatches {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(policy.PostKillDelay)
 	}
 	identityMatches, verificationError = verifyProcessIdentity(identity, identityOperations)
 	if verificationError != nil {
@@ -243,7 +246,7 @@ func KillProcess(identity ProcessIdentity, gracePeriod time.Duration) error {
 		}
 		return signalError
 	}
-	stopped := waitUntil(2*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitUntil(policy.StopWait, policy.StopPoll, func() bool {
 		identityMatches, verificationError = verifyProcessIdentity(identity, identityOperations)
 		return verificationError != nil || !identityMatches
 	})
@@ -310,7 +313,7 @@ func ProcessStart(processID int) (string, error) {
 
 // ListenProcessIDsPort returns the process IDs listening on a TCP port.
 func ListenProcessIDsPort(port int, excludeSelf bool) ([]int, error) {
-	if port <= 0 || port > 65_535 {
+	if port <= 0 || port > maximumTCPPort {
 		return nil, fmt.Errorf("invalid port %d", port)
 	}
 	connections, operationError := systemnetwork.Connections("tcp")

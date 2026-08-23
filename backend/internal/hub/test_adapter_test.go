@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/rezoch340/any-aicli-remote/backend/internal/fsapi"
 	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
 
@@ -173,9 +175,29 @@ func (providerInstance *testProvider) DaemonNotification(kind providerapi.Notifi
 	return methods[kind], params
 }
 
+func testHubPolicy() Policy {
+	return Policy{
+		ReadBufferBytes: 64 << 10, WriteBufferBytes: 64 << 10, MaxMessageBytes: 16 << 20,
+		Heartbeat: 20 * time.Second, ClientReadTimeout: 60 * time.Second,
+		WatcherEnsureInterval: 5 * time.Second, StateBroadcastInterval: 15 * time.Second,
+		EnsureAttempt: 12 * time.Second, ClientConnectEnsure: 15 * time.Second,
+		DialAttempts: 3, DialHandshake: 8 * time.Second, RetryDelay: 250 * time.Millisecond,
+		WriteTimeout: 20 * time.Second, ControlWriteTimeout: 5 * time.Second,
+		PendingLimit: 256, PendingClientLimit: 32, PendingTimeout: 30 * time.Minute,
+		NormalEnsure: 5 * time.Second, PatientEnsure: 18 * time.Second,
+		NotificationEnsure: 3 * time.Second, ReverseOperationTimeout: 2 * time.Minute,
+		ReverseReadBytes: 2_000_000, TerminalOutputBytes: 1 << 20,
+		FilesystemPolicy: fsapi.Policy{MaxReadBytes: 2 * 1024 * 1024, MaxWriteBytes: 4 * 1024 * 1024, MaxListItems: 10_000},
+	}
+}
+
 func newTestHub(agentURL, workingDirectory string, ensureAgent EnsureAgentFunc) *Hub {
 	providerInstance := &testProvider{workingDirectory: workingDirectory}
-	return New(agentURL, providerInstance, providerInstance, ensureAgent, nil)
+	hubInstance, operationError := New(agentURL, providerInstance, providerInstance, ensureAgent, testHubPolicy(), nil)
+	if operationError != nil {
+		panic(operationError)
+	}
+	return hubInstance
 }
 
 var (

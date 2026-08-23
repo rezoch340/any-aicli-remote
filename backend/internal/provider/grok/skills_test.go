@@ -12,7 +12,7 @@ import (
 func TestSkillRootsUseProviderAndSessionWorkspaceConventions(testContext *testing.T) {
 	providerDirectory := testContext.TempDir()
 	workingDirectory := testContext.TempDir()
-	providerInstance := New(Config{SessionsDirectory: filepath.Join(providerDirectory, "sessions")})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: filepath.Join(providerDirectory, "sessions")})
 	roots := providerInstance.SkillRoots(workingDirectory)
 	if !containsSkillRoot(roots.Roots, filepath.Join(providerDirectory, "skills"), providerapi.SkillRootKindSkill, providerapi.SkillRootSourceUser) ||
 		!containsSkillRoot(roots.Roots, filepath.Join(providerDirectory, "bundled", "skills"), providerapi.SkillRootKindSkill, providerapi.SkillRootSourceBundled) ||
@@ -33,7 +33,7 @@ func TestSkillRootsDeclareOnlyActualPluginCommandDirectories(testContext *testin
 	writeSkillFixture(testContext, filepath.Join(skillDirectory, "SKILL.md"), "---\nname: sample-skill\ndescription: Sample skill\n---\n")
 	writeSkillFixture(testContext, filepath.Join(documentationDirectory, "guide.md"), "---\nname: guide\ndescription: Documentation only\n---\n")
 
-	providerInstance := New(Config{SessionsDirectory: filepath.Join(providerDirectory, "sessions")})
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: filepath.Join(providerDirectory, "sessions")})
 	roots := providerInstance.SkillRoots("")
 	canonicalCommandDirectory, operationError := filepath.EvalSymlinks(commandDirectory)
 	if operationError != nil {
@@ -46,7 +46,8 @@ func TestSkillRootsDeclareOnlyActualPluginCommandDirectories(testContext *testin
 		testContext.Fatalf("broad plugin directory must not be a command root: %#v", roots.Roots)
 	}
 
-	items, operationError := skillsapi.Scan(roots.Roots)
+	scanPolicy := skillsapi.Policy{MaxFileBytes: 1 << 20, DescriptionMaxRunes: 240, MaxItems: 2000}
+	items, operationError := skillsapi.Scan(roots.Roots, scanPolicy)
 	if operationError != nil {
 		testContext.Fatalf("scan typed roots: %v", operationError)
 	}

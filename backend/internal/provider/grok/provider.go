@@ -10,10 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/rezoch340/any-aicli-remote/backend/internal/fsapi"
@@ -21,62 +21,13 @@ import (
 	historydata "github.com/rezoch340/any-aicli-remote/backend/internal/provider/grok/historydata"
 )
 
-const ProviderID = "grok"
-
-type Config struct {
-	SessionsDirectory string
-	ExecutablePath    string
-	AlwaysApprove     bool
-	Leader            bool
-}
-
-type GrokProvider struct {
-	activeRoot     string
-	archivedRoot   string
-	executablePath string
-	alwaysApprove  bool
-	leader         bool
-	renameMutex    sync.Mutex
-}
-
-type scannedSession struct {
-	metadata providerapi.SessionMetadata
-	active   bool
-}
-
-type sessionAccess struct {
-	root        *os.Root
-	sourcePath  string
-	summaryData map[string]any
-}
-
-func (access *sessionAccess) Close() error {
-	if access == nil || access.root == nil {
-		return nil
-	}
-	return access.root.Close()
-}
-
-func New(configuration Config) *GrokProvider {
-	activeRoot := strings.TrimSpace(configuration.SessionsDirectory)
-	if activeRoot == "" {
-		homeDirectory, _ := os.UserHomeDir()
-		activeRoot = filepath.Join(homeDirectory, ".grok", "sessions")
-	}
-	return &GrokProvider{
-		activeRoot:     activeRoot,
-		archivedRoot:   filepath.Join(filepath.Dir(activeRoot), "archived_sessions"),
-		executablePath: strings.TrimSpace(configuration.ExecutablePath),
-		alwaysApprove:  configuration.AlwaysApprove,
-		leader:         configuration.Leader,
-	}
-}
+const (
+	ProviderID                    = "grok"
+	temporaryFileCreationAttempts = 16
+	randomSuffixBytes             = 16
+)
 
 func (providerInstance *GrokProvider) ID() string { return ProviderID }
-
-func (providerInstance *GrokProvider) sessionRoots() []string {
-	return []string{providerInstance.activeRoot, providerInstance.archivedRoot}
-}
 
 func (providerInstance *GrokProvider) ScanSessions(operationContext context.Context) ([]providerapi.SessionMetadata, error) {
 	selected := make(map[string]scannedSession)
@@ -167,7 +118,7 @@ func (providerInstance *GrokProvider) LoadMessages(operationContext context.Cont
 	defer file.Close()
 	messages := make([]providerapi.Message, 0)
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	scanner.Buffer(make([]byte, providerInstance.historyPolicy.MessageScanInitialBytes), providerInstance.historyPolicy.MessageScanMaxBytes)
 	for scanner.Scan() {
 		if operationError := operationContext.Err(); operationError != nil {
 			return nil, operationError
@@ -213,10 +164,13 @@ func (providerInstance *GrokProvider) ReadHistory(operationContext context.Conte
 		return providerapi.HistoryPage{}, operationError
 	}
 	defer access.Close()
-	events, historyMetadata := historydata.ReadSessionUpdatesFromRoot(access.root, filepath.Join(filepath.Dir(access.sourcePath), "updates.jsonl"), historydata.ReadOptions{
+	events, historyMetadata, operationError := historydata.ReadSessionUpdatesFromRoot(access.root, filepath.Join(filepath.Dir(access.sourcePath), "updates.jsonl"), providerInstance.historyPolicy, historydata.ReadOptions{
 		Limit: query.Limit, MaxBytes: query.MaxBytes, SinceBytes: query.SinceBytes,
 		Live: query.Live, BeforeBytes: query.BeforeBytes, ChatOnly: query.ChatOnly,
 	})
+	if operationError != nil {
+		return providerapi.HistoryPage{}, operationError
+	}
 	if historyError, valid := historyMetadata["error"].(string); valid && strings.TrimSpace(historyError) != "" {
 		return providerapi.HistoryPage{}, errors.New(historyError)
 	}
@@ -241,7 +195,7 @@ func (providerInstance *GrokProvider) ReadSignals(operationContext context.Conte
 		return nil, operationError
 	}
 	defer access.Close()
-	data, operationError := readRegularFile(access.root, "signals.json")
+	data, operationError := providerInstance.readMetadataFile(access.root, "signals.json")
 	if errors.Is(operationError, os.ErrNotExist) {
 		return map[string]any{}, nil
 	}
@@ -323,8 +277,8 @@ func (providerInstance *GrokProvider) parseSummary(path string) (providerapi.Ses
 	if sessionID == "" {
 		return providerapi.SessionMetadata{}, errors.New("summary info.id required")
 	}
-	title := truncate(firstString(summary, "remote_title", "generated_title", "session_summary"), 80)
-	sessionSummary := truncate(firstString(summary, "session_summary"), 160)
+	title := truncate(firstString(summary, "remote_title", "generated_title", "session_summary"), providerInstance.historyPolicy.MetadataTitleMaxRunes)
+	sessionSummary := truncate(firstString(summary, "session_summary"), providerInstance.historyPolicy.MetadataSummaryMaxRunes)
 	projectDirectory := strings.TrimSpace(stringValue(info["cwd"]))
 	if projectDirectory == "" {
 		projectDirectory = strings.TrimSpace(stringValue(summary["cwd"]))
@@ -410,16 +364,15 @@ func (providerInstance *GrokProvider) openSessionSource(expectedSessionID, sourc
 		_ = sessionRoot.Close()
 		return nil, operationError
 	}
-	summaryFile, operationError := openRegularFile(sessionRoot, "summary.json")
+	summaryData, operationError := providerInstance.readMetadataFile(sessionRoot, "summary.json")
 	if operationError != nil {
 		_ = sessionRoot.Close()
 		return nil, operationError
 	}
 	summary := map[string]any{}
-	decoder := json.NewDecoder(summaryFile)
+	decoder := json.NewDecoder(strings.NewReader(string(summaryData)))
 	decoder.UseNumber()
 	operationError = decoder.Decode(&summary)
-	_ = summaryFile.Close()
 	if operationError != nil {
 		_ = sessionRoot.Close()
 		return nil, operationError
@@ -511,8 +464,8 @@ func validateDirectoryComponents(root *os.Root, relativePath string) error {
 }
 
 func createTemporarySummary(root *os.Root) (string, *os.File, error) {
-	for attempt := 0; attempt < 16; attempt++ {
-		randomBytes := make([]byte, 16)
+	for attempt := 0; attempt < temporaryFileCreationAttempts; attempt++ {
+		randomBytes := make([]byte, randomSuffixBytes)
 		if _, operationError := rand.Read(randomBytes); operationError != nil {
 			return "", nil, operationError
 		}
@@ -529,13 +482,24 @@ func createTemporarySummary(root *os.Root) (string, *os.File, error) {
 	return "", nil, errors.New("could not create unique summary file")
 }
 
-func readRegularFile(root *os.Root, name string) ([]byte, error) {
+func (providerInstance *GrokProvider) readMetadataFile(root *os.Root, name string) ([]byte, error) {
 	file, operationError := openRegularFile(root, name)
 	if operationError != nil {
 		return nil, operationError
 	}
 	defer file.Close()
-	return io.ReadAll(file)
+	limit := providerInstance.historyPolicy.AdapterReadBytes
+	if limit < 1 || limit >= int64(math.MaxInt64) {
+		return nil, MetadataFileTooLargeError
+	}
+	data, operationError := io.ReadAll(io.LimitReader(file, limit+1))
+	if operationError != nil {
+		return nil, operationError
+	}
+	if int64(len(data)) > limit {
+		return nil, MetadataFileTooLargeError
+	}
+	return data, nil
 }
 
 func collectSummaryPaths(operationContext context.Context, root string) ([]string, error) {
@@ -591,5 +555,7 @@ func truncate(value string, limit int) string {
 	}
 	return string(runes[:limit]) + "..."
 }
+
+var MetadataFileTooLargeError = errors.New("metadata file too large")
 
 var _ providerapi.Provider = (*GrokProvider)(nil)

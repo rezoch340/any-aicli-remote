@@ -8,7 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/atomicfile"
 	"regexp"
 	"sort"
 	"strconv"
@@ -18,12 +19,8 @@ import (
 )
 
 const (
-	MinInterval       = 60
-	MaxInterval       = 7 * 24 * 60 * 60
-	DefaultInterval   = 5 * 60
-	DefaultExpiration = 7 * 24 * time.Hour
-	MaxJobs           = 50
-	fireTimeout       = 10 * time.Minute
+	jobIDGenerationAttempts = 8
+	jobIDRandomBytes        = 5
 )
 
 var (
@@ -31,7 +28,7 @@ var (
 	SessionRequiredError = errors.New("sessionId required")
 	PromptRequiredError  = errors.New("prompt required")
 	BadIntervalError     = errors.New("bad interval")
-	MaximumJobsError     = errors.New("max 50 loops")
+	MaximumJobsError     = errors.New("maximum loop jobs exceeded")
 )
 
 type Job struct {
@@ -63,23 +60,28 @@ type Manager struct {
 	running          bool
 	waitGroup        sync.WaitGroup
 	now              func() time.Time
+	policy           Policy
 }
 
 type storeFile struct {
 	Jobs []Job `json:"jobs"`
 }
 
-func New(store string, fire FireFunc) (*Manager, error) {
+func New(store string, fire FireFunc, policy Policy) (*Manager, error) {
+	if operationError := policy.Validate(); operationError != nil {
+		return nil, operationError
+	}
 	store = strings.TrimSpace(store)
 	if store == "" {
 		return nil, StoreRequiredError
 	}
 	manager := &Manager{
-		store: store,
-		fire:  fire,
-		jobs:  make(map[string]*Job),
-		tasks: make(map[string]context.CancelFunc),
-		now:   time.Now,
+		store:  store,
+		fire:   fire,
+		policy: policy,
+		jobs:   make(map[string]*Job),
+		tasks:  make(map[string]context.CancelFunc),
+		now:    time.Now,
 	}
 	if operationError := manager.load(); operationError != nil {
 		return nil, operationError
@@ -159,15 +161,15 @@ func (manager *Manager) Create(sessionID, prompt string, intervalSeconds int, in
 	if prompt == "" {
 		return Job{}, PromptRequiredError
 	}
-	intervalSeconds, normalizedLabel := NormalizeInterval(intervalSeconds)
+	intervalSeconds, normalizedLabel := manager.policy.NormalizeInterval(intervalSeconds)
 	if strings.TrimSpace(intervalLabel) == "" {
 		intervalLabel = normalizedLabel
 	}
 
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
-	if len(manager.jobs) >= MaxJobs {
-		return Job{}, MaximumJobsError
+	if len(manager.jobs) >= manager.policy.MaxJobs {
+		return Job{}, fmt.Errorf("%w: max %d", MaximumJobsError, manager.policy.MaxJobs)
 	}
 	identifier, operationError := manager.newIDLocked()
 	if operationError != nil {
@@ -182,7 +184,7 @@ func (manager *Manager) Create(sessionID, prompt string, intervalSeconds int, in
 		IntervalLabel:    strings.TrimSpace(intervalLabel),
 		WorkingDirectory: strings.TrimSpace(workingDirectory),
 		CreatedAt:        float64(now.UnixNano()) / float64(time.Second),
-		ExpiresAt:        float64(now.Add(DefaultExpiration).UnixNano()) / float64(time.Second),
+		ExpiresAt:        float64(now.Add(manager.policy.Retention).UnixNano()) / float64(time.Second),
 	}
 	manager.jobs[identifier] = job
 	if operationError := manager.saveLocked(); operationError != nil {
@@ -233,60 +235,37 @@ func (manager *Manager) Stop(jobID, sessionID string) ([]Job, error) {
 	return removed, nil
 }
 
-func ParseInterval(raw string) (seconds int, label string, operationError error) {
+func parseInterval(raw string) (seconds int, operationError error) {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	raw = strings.TrimSpace(strings.TrimPrefix(raw, "every"))
 	if raw == "" {
-		return 0, "", BadIntervalError
+		return 0, BadIntervalError
 	}
 	match := intervalPattern.FindStringSubmatch(raw)
 	if len(match) != 3 {
-		return 0, "", BadIntervalError
+		return 0, BadIntervalError
 	}
 	quantity, parseError := strconv.ParseInt(match[1], 10, 64)
 	if parseError != nil || quantity < 0 {
-		return 0, "", BadIntervalError
+		return 0, BadIntervalError
 	}
-	unit := match[2]
-	multiplier := int64(60)
-	if unit != "" {
-		switch unit[0] {
+	multiplier := int64(secondsPerMinute)
+	if match[2] != "" {
+		switch match[2][0] {
 		case 's':
-			multiplier = 1
+			multiplier = int64(secondsPerSecond)
 		case 'm':
-			multiplier = 60
+			multiplier = int64(secondsPerMinute)
 		case 'h':
-			multiplier = 60 * 60
+			multiplier = int64(secondsPerHour)
 		case 'd':
-			multiplier = 24 * 60 * 60
+			multiplier = int64(secondsPerDay)
 		}
 	}
-	if quantity > int64(MaxInterval) {
-		seconds = MaxInterval
-	} else {
-		seconds = int(quantity * multiplier)
+	if quantity > int64(^uint(0)>>1)/multiplier {
+		return 0, BadIntervalError
 	}
-	seconds, label = NormalizeInterval(seconds)
-	return seconds, label, nil
-}
-
-func NormalizeInterval(seconds int) (int, string) {
-	if seconds < MinInterval {
-		seconds = MinInterval
-	}
-	if seconds > MaxInterval {
-		seconds = MaxInterval
-	}
-	switch {
-	case seconds >= 24*60*60 && seconds%(24*60*60) == 0:
-		return seconds, fmt.Sprintf("%dd", seconds/(24*60*60))
-	case seconds >= 60*60 && seconds%(60*60) == 0:
-		return seconds, fmt.Sprintf("%dh", seconds/(60*60))
-	case seconds%60 == 0:
-		return seconds, fmt.Sprintf("%dm", seconds/60)
-	default:
-		return seconds, fmt.Sprintf("%ds", seconds)
-	}
+	return int(quantity * multiplier), nil
 }
 
 var intervalPattern = regexp.MustCompile(`^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)?$`)
@@ -345,7 +324,7 @@ func (manager *Manager) run(operationContext context.Context, identifier string,
 		note := fmt.Sprintf("[REMOTE LOOP · %s · fire %d]\n%s", snapshot.IntervalLabel, nextFire, snapshot.Prompt)
 		manager.mutex.Unlock()
 
-		fireContext, cancel := context.WithTimeout(operationContext, fireTimeout)
+		fireContext, cancel := context.WithTimeout(operationContext, manager.policy.FireTimeout)
 		var fireError error
 		if manager.fire != nil {
 			fireError = manager.fire(fireContext, snapshot, note)
@@ -359,7 +338,7 @@ func (manager *Manager) run(operationContext context.Context, identifier string,
 			return
 		}
 		if fireError != nil {
-			current.LastError = truncate(fireError.Error(), 200)
+			current.LastError = truncate(fireError.Error(), manager.policy.LastErrorRunes)
 		} else {
 			current.Fires++
 			current.LastFire = float64(manager.now().UnixNano()) / float64(time.Second)
@@ -393,7 +372,7 @@ func (manager *Manager) load() error {
 	}
 	now := manager.now()
 	for _, loaded := range stored.Jobs {
-		if len(manager.jobs) >= MaxJobs {
+		if len(manager.jobs) >= manager.policy.MaxJobs {
 			break
 		}
 		loaded.ID = strings.TrimSpace(loaded.ID)
@@ -403,7 +382,7 @@ func (manager *Manager) load() error {
 			continue
 		}
 		var defaultLabel string
-		loaded.IntervalSeconds, defaultLabel = NormalizeInterval(loaded.IntervalSeconds)
+		loaded.IntervalSeconds, defaultLabel = manager.policy.NormalizeInterval(loaded.IntervalSeconds)
 		if strings.TrimSpace(loaded.IntervalLabel) == "" {
 			loaded.IntervalLabel = defaultLabel
 		}
@@ -411,7 +390,7 @@ func (manager *Manager) load() error {
 			loaded.CreatedAt = float64(now.UnixNano()) / float64(time.Second)
 		}
 		if loaded.ExpiresAt <= 0 {
-			loaded.ExpiresAt = loaded.CreatedAt + DefaultExpiration.Seconds()
+			loaded.ExpiresAt = loaded.CreatedAt + manager.policy.Retention.Seconds()
 		}
 		job := loaded
 		manager.jobs[job.ID] = &job
@@ -430,37 +409,19 @@ func (manager *Manager) saveLocked() error {
 		}
 		return jobs[leftIndex].CreatedAt < jobs[rightIndex].CreatedAt
 	})
-	if operationError := os.MkdirAll(filepath.Dir(manager.store), 0o700); operationError != nil {
-		return fmt.Errorf("create loops directory: %w", operationError)
-	}
-	temporaryPath, operationError := os.CreateTemp(filepath.Dir(manager.store), ".loops-*.json")
+	data, operationError := json.MarshalIndent(storeFile{Jobs: jobs}, "", "  ")
 	if operationError != nil {
-		return fmt.Errorf("create loops file: %w", operationError)
-	}
-	temporaryName := temporaryPath.Name()
-	defer os.Remove(temporaryName)
-	if operationError := temporaryPath.Chmod(0o600); operationError != nil {
-		_ = temporaryPath.Close()
-		return operationError
-	}
-	encoder := json.NewEncoder(temporaryPath)
-	encoder.SetIndent("", "  ")
-	if operationError := encoder.Encode(storeFile{Jobs: jobs}); operationError != nil {
-		_ = temporaryPath.Close()
 		return fmt.Errorf("encode loops: %w", operationError)
 	}
-	if operationError := temporaryPath.Close(); operationError != nil {
-		return operationError
-	}
-	if operationError := os.Rename(temporaryName, manager.store); operationError != nil {
+	if operationError := atomicfile.WritePrivate(manager.store, append(data, '\n')); operationError != nil {
 		return fmt.Errorf("replace loops: %w", operationError)
 	}
 	return nil
 }
 
 func (manager *Manager) newIDLocked() (string, error) {
-	for range 8 {
-		var data [5]byte
+	for range jobIDGenerationAttempts {
+		var data [jobIDRandomBytes]byte
 		if _, operationError := rand.Read(data[:]); operationError != nil {
 			return "", fmt.Errorf("generate loop id: %w", operationError)
 		}
@@ -478,4 +439,10 @@ func truncate(text string, max int) string {
 		return text
 	}
 	return string(runes[:max])
+}
+
+func (manager *Manager) Policy() Policy {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
+	return manager.policy
 }

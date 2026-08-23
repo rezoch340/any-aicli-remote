@@ -26,7 +26,9 @@ func (server *Server) handleFSSetRoot(responseWriter http.ResponseWriter, reques
 		ProviderID string `json:"providerId"`
 		SessionID  string `json:"sessionId"`
 	}
-	decodeLooseJSON(request, &body)
+	if !server.decodeLooseJSON(responseWriter, request, &body) {
+		return
+	}
 	filesystem, operationError := server.filesystemForSession(request.Context(), body.ProviderID, body.SessionID)
 	if operationError != nil {
 		writeWorkspaceError(responseWriter, operationError)
@@ -83,7 +85,7 @@ func (server *Server) handleFSWrite(responseWriter http.ResponseWriter, request 
 		Path       string  `json:"path"`
 		Content    *string `json:"content"`
 	}
-	if errorValue := decodeJSON(responseWriter, request, &body, false); errorValue != nil {
+	if errorValue := server.decodeJSON(responseWriter, request, &body, false); errorValue != nil {
 		return
 	}
 	if strings.TrimSpace(body.Path) == "" || body.Content == nil {
@@ -114,7 +116,7 @@ func (server *Server) handleFSMkdir(responseWriter http.ResponseWriter, request 
 		SessionID  string `json:"sessionId"`
 		Path       string `json:"path"`
 	}
-	if errorValue := decodeJSON(responseWriter, request, &body, false); errorValue != nil {
+	if errorValue := server.decodeJSON(responseWriter, request, &body, false); errorValue != nil {
 		return
 	}
 	filesystem, errorValue := server.filesystemForSession(request.Context(), body.ProviderID, body.SessionID)
@@ -139,7 +141,7 @@ func (server *Server) handleSkills(responseWriter http.ResponseWriter, request *
 		return
 	}
 	roots := server.skillRoots.SkillRoots(workingDirectory)
-	items, errorValue := skills.Scan(roots.Roots)
+	items, errorValue := skills.Scan(roots.Roots, server.skillsPolicy)
 	if errorValue != nil {
 		writeAPIError(responseWriter, http.StatusInternalServerError, errorValue)
 		return

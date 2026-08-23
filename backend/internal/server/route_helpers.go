@@ -34,27 +34,54 @@ func writeAPIError(responseWriter http.ResponseWriter, status int, errorValue er
 	writeJSON(responseWriter, status, map[string]any{"ok": false, "error": errorValue.Error()})
 }
 
-func decodeJSON(responseWriter http.ResponseWriter, request *http.Request, target any, allowEmpty bool) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(responseWriter, request.Body, maxRequestBody))
+func (server *Server) decodeJSON(responseWriter http.ResponseWriter, request *http.Request, target any, allowEmpty bool) error {
+	body := http.MaxBytesReader(responseWriter, request.Body, server.configuration.Canonical.Tuning.HTTP.MaxRequestBodyBytes)
+	defer body.Close()
+	decoder := json.NewDecoder(body)
 	decoder.UseNumber()
-	errorValue := decoder.Decode(target)
-	if errors.Is(errorValue, io.EOF) && allowEmpty {
+	decodeError := decoder.Decode(target)
+	_, drainError := io.Copy(io.Discard, body)
+	if operationError := requestBodyLimitError(decodeError, drainError); operationError != nil {
+		writeText(responseWriter, http.StatusRequestEntityTooLarge, "request body too large")
+		return operationError
+	}
+	if errors.Is(decodeError, io.EOF) && allowEmpty {
 		return nil
 	}
-	if errorValue != nil {
+	if decodeError != nil {
 		writeText(responseWriter, http.StatusBadRequest, "json required")
-		return errorValue
+		return decodeError
 	}
 	return nil
 }
 
-func decodeLooseJSON(request *http.Request, target any) {
+// decodeLooseJSON preserves legacy permissive JSON parsing while ensuring an
+// oversized body cannot continue into a mutating handler.
+func (server *Server) decodeLooseJSON(responseWriter http.ResponseWriter, request *http.Request, target any) bool {
 	if request.Body == nil {
-		return
+		return true
 	}
-	decoder := json.NewDecoder(io.LimitReader(request.Body, maxRequestBody))
+	body := http.MaxBytesReader(responseWriter, request.Body, server.configuration.Canonical.Tuning.HTTP.MaxRequestBodyBytes)
+	defer body.Close()
+	decoder := json.NewDecoder(body)
 	decoder.UseNumber()
-	_ = decoder.Decode(target)
+	decodeError := decoder.Decode(target)
+	_, drainError := io.Copy(io.Discard, body)
+	if operationError := requestBodyLimitError(decodeError, drainError); operationError != nil {
+		writeText(responseWriter, http.StatusRequestEntityTooLarge, "request body too large")
+		return false
+	}
+	return true
+}
+
+func requestBodyLimitError(errorsToCheck ...error) error {
+	for _, operationError := range errorsToCheck {
+		var limitError *http.MaxBytesError
+		if errors.As(operationError, &limitError) {
+			return operationError
+		}
+	}
+	return nil
 }
 
 func writeFSError(responseWriter http.ResponseWriter, errorValue error) {

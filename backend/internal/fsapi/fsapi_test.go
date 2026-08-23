@@ -2,11 +2,14 @@ package fsapi
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+var testFilesystemPolicy = Policy{MaxReadBytes: 1024, MaxWriteBytes: 1024, MaxListItems: 10}
 
 func TestServiceReadWriteListAndMkdir(testContext *testing.T) {
 	root := testContext.TempDir()
@@ -21,7 +24,7 @@ func TestServiceReadWriteListAndMkdir(testContext *testing.T) {
 		testContext.Fatal(operationError)
 	}
 
-	service, operationError := New(root)
+	service, operationError := New(root, testFilesystemPolicy)
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -90,7 +93,7 @@ func TestServiceRejectsWorkspaceEscapeIncludingSymlink(testContext *testing.T) {
 	if operationError := os.Symlink(outside, filepath.Join(root, "escape")); operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	service, operationError := New(root)
+	service, operationError := New(root, testFilesystemPolicy)
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -128,8 +131,8 @@ func TestServiceSizeLimitsAndDecoding(testContext *testing.T) {
 	root := testContext.TempDir()
 	mustWrite(testContext, filepath.Join(root, "bom.txt"), append([]byte{0xef, 0xbb, 0xbf}, []byte("hello")...))
 	mustWrite(testContext, filepath.Join(root, "latin.txt"), []byte{'c', 'a', 'f', 0xe9})
-	mustWrite(testContext, filepath.Join(root, "large.txt"), make([]byte, MaxRead+1))
-	service, operationError := New(root)
+	mustWrite(testContext, filepath.Join(root, "large.txt"), make([]byte, testFilesystemPolicy.MaxReadBytes+1))
+	service, operationError := New(root, testFilesystemPolicy)
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -146,7 +149,7 @@ func TestServiceSizeLimitsAndDecoding(testContext *testing.T) {
 	if _, operationError := service.Read("large.txt"); !errors.Is(operationError, FileTooLargeError) {
 		testContext.Fatalf("large read error = %v", operationError)
 	}
-	if _, operationError := service.Write("too-large.txt", strings.Repeat("x", MaxWrite+1)); !errors.Is(operationError, ContentTooLargeError) {
+	if _, operationError := service.Write("too-large.txt", strings.Repeat("x", int(testFilesystemPolicy.MaxWriteBytes+1))); !errors.Is(operationError, ContentTooLargeError) {
 		testContext.Fatalf("large write error = %v", operationError)
 	}
 }
@@ -154,7 +157,7 @@ func TestServiceSizeLimitsAndDecoding(testContext *testing.T) {
 func TestSetRoot(testContext *testing.T) {
 	first := testContext.TempDir()
 	second := testContext.TempDir()
-	service, operationError := New(first)
+	service, operationError := New(first, testFilesystemPolicy)
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -187,7 +190,7 @@ func TestPinnedWorkspaceFailsClosedAfterRootReplacement(testContext *testing.T) 
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	service, operationError := NewPinned(rootIdentity)
+	service, operationError := NewPinned(rootIdentity, testFilesystemPolicy)
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -222,5 +225,40 @@ func mustWrite(testContext *testing.T, path string, data []byte) {
 	testContext.Helper()
 	if operationError := os.WriteFile(path, data, 0o644); operationError != nil {
 		testContext.Fatal(operationError)
+	}
+}
+
+func TestPolicyRejectsInvalidSentinelLimits(testContext *testing.T) {
+	if operationError := (Policy{MaxReadBytes: 0, MaxWriteBytes: 1, MaxListItems: 1}).Validate(); operationError == nil {
+		testContext.Fatal("zero read limit accepted")
+	}
+	if operationError := (Policy{MaxReadBytes: 1, MaxWriteBytes: math.MaxInt64, MaxListItems: 1}).Validate(); operationError == nil {
+		testContext.Fatal("write sentinel overflow accepted")
+	}
+	if _, operationError := New(testContext.TempDir(), Policy{MaxReadBytes: math.MaxInt64, MaxWriteBytes: 1, MaxListItems: 1}); operationError == nil {
+		testContext.Fatal("read sentinel overflow accepted")
+	}
+	if operationError := (Policy{MaxReadBytes: 1, MaxWriteBytes: 1, MaxListItems: 0}).Validate(); operationError == nil {
+		testContext.Fatal("zero list limit accepted")
+	}
+	if operationError := (Policy{MaxReadBytes: 1, MaxWriteBytes: 1, MaxListItems: int(^uint(0) >> 1)}).Validate(); operationError == nil {
+		testContext.Fatal("list sentinel overflow accepted")
+	}
+}
+
+func TestListEnforcesItemLimit(testContext *testing.T) {
+	root := testContext.TempDir()
+	mustWrite(testContext, filepath.Join(root, "one.txt"), []byte("one"))
+	service, operationError := New(root, Policy{MaxReadBytes: 1024, MaxWriteBytes: 1024, MaxListItems: 1})
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	testContext.Cleanup(func() { _ = service.Close() })
+	if listing, operationError := service.List("."); operationError != nil || len(listing.Files) != 1 {
+		testContext.Fatalf("one entry listing = %#v, %v", listing, operationError)
+	}
+	mustWrite(testContext, filepath.Join(root, "two.txt"), []byte("two"))
+	if _, operationError := service.List("."); !errors.Is(operationError, DirectoryListingTooLargeError) {
+		testContext.Fatalf("two entry listing error = %v", operationError)
 	}
 }

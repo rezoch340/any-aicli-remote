@@ -192,7 +192,7 @@ func TestClosedHubRejectsNewWebSocketBeforeUpgrade(testInstance *testing.T) {
 }
 
 func TestTerminalCreateCannotCrossCloseBoundary(testInstance *testing.T) {
-	managerInstance := newTerminalManager()
+	managerInstance := newTerminalManager(testHubPolicy().TerminalOutputBytes, testHubPolicy().FilesystemPolicy)
 	workingDirectory := testInstance.TempDir()
 	managerInstance.accessMutex.Lock()
 	closeReturned := make(chan struct{})

@@ -133,3 +133,10 @@ libraries. Keep only the smallest compatible dependency or adapter.
 - Decision: keep the small standard-library `go/ast` gate for only those exact rules. Do not add general
   lint checks to it, duplicate compiler/vet analysis, or turn it into a custom linter framework. Re-evaluate
   this exception if an established analyzer gains strict, configurable exemptions and forbidden-word rules.
+
+## Go atomic private-state persistence
+
+Configuration and private state persistence use `github.com/google/renameio/v2` for complete-file
+atomic replacement. It was selected over `creachadair/atomicfile` and direct `os.Rename`: renameio
+provides a maintained temporary-file-and-rename workflow with explicit permissions. The daemon target
+is macOS and Linux; renameio's documented platform support does not include Windows.

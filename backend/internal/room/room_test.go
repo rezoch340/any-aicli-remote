@@ -1,15 +1,15 @@
 package room
 
 import (
+	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestSayFeedMembersClear(testContext *testing.T) {
-	store := New(testContext.TempDir())
+	store := newTestStore(testContext)
 	base := time.Unix(1_700_000_000, 0)
 	tick := 0
 	store.now = func() time.Time {
@@ -39,7 +39,7 @@ func TestSayFeedMembersClear(testContext *testing.T) {
 		testContext.Fatalf("bad limited feed %#v err=%v", one, operationError)
 	}
 
-	members, operationError := store.Members(900 * time.Second)
+	members, operationError := store.Members()
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -56,28 +56,17 @@ func TestSayFeedMembersClear(testContext *testing.T) {
 	}
 }
 
-func TestCleanRuneLimitAndDataDirectory(testContext *testing.T) {
-	if got := Clean(strings.Repeat("界", Limit+5)); len([]rune(got)) != Limit {
-		testContext.Fatalf("Clean rune cap = %d", len([]rune(got)))
-	}
-	directory := testContext.TempDir()
-	testContext.Setenv("GROK_PLUGIN_DATA", filepath.Join(directory, "data"))
-	got, operationError := DataDirectory()
-	if operationError != nil {
-		testContext.Fatal(operationError)
-	}
-	if _, operationError := os.Stat(got); operationError != nil {
-		testContext.Fatal(operationError)
-	}
-	if got != filepath.Join(directory, "data") {
-		testContext.Fatalf("DataDir=%q", got)
+func TestCleanRuneLimitAndPolicy(testContext *testing.T) {
+	policy := testPolicy()
+	if got := clean(strings.Repeat("界", policy.MessageRuneLimit+5), policy.MessageRuneLimit); len([]rune(got)) != policy.MessageRuneLimit {
+		testContext.Fatalf("clean rune cap = %d", len([]rune(got)))
 	}
 }
 
 func TestCompactionKeepsIDs(testContext *testing.T) {
-	store := New(testContext.TempDir())
+	store := newTestStore(testContext)
 	store.now = func() time.Time { return time.Unix(1_700_000_000, 0) }
-	for itemIndex := 0; itemIndex < Keep+1; itemIndex++ {
+	for itemIndex := 0; itemIndex < store.policy.CompactionThreshold+1; itemIndex++ {
 		if result := store.Say("agent", "msg", "say"); !result.OK {
 			testContext.Fatalf("say %d: %+v", itemIndex, result)
 		}
@@ -88,10 +77,72 @@ func TestCompactionKeepsIDs(testContext *testing.T) {
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
-	if len(messages) != Keep/2+1 {
-		testContext.Fatalf("compacted len=%d want %d", len(messages), Keep/2+1)
+	if len(messages) != store.policy.CompactionRetainMessages+1 {
+		testContext.Fatalf("compacted len=%d want %d", len(messages), store.policy.CompactionRetainMessages+1)
 	}
-	if messages[len(messages)-1].ID != Keep+1 {
+	if messages[len(messages)-1].ID != store.policy.CompactionThreshold+1 {
 		testContext.Fatalf("last id=%d", messages[len(messages)-1].ID)
+	}
+}
+
+func testPolicy() Policy {
+	return Policy{MessageRuneLimit: 240, SpeakerRuneLimit: 32, KindRuneLimit: 12, CompactionThreshold: 20, CompactionRetainMessages: 10, FeedDefaultLimit: 4, FeedMaxLimit: 8, MemberWindow: 15 * time.Minute, ScannerInitialBytes: 64 * 1024, ScannerMaxBytes: 4 * 1024 * 1024}
+}
+func newTestStore(testContext *testing.T) *Store {
+	testContext.Helper()
+	store, operationError := New(testContext.TempDir(), testPolicy())
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	return store
+}
+
+func TestPolicyControlsRoomBehavior(testContext *testing.T) {
+	policy := Policy{MessageRuneLimit: 3, SpeakerRuneLimit: 2, KindRuneLimit: 1, CompactionThreshold: 4, CompactionRetainMessages: 2, FeedDefaultLimit: 2, FeedMaxLimit: 3, MemberWindow: time.Minute, ScannerInitialBytes: 8, ScannerMaxBytes: 512}
+	store, operationError := New(testContext.TempDir(), policy)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	store.now = func() time.Time { return now }
+	if result := store.Say("界界界", "界界界界", "long"); !result.OK || result.Message.Who != "界界" || result.Message.Text != "界界界" || result.Message.Kind != "l" {
+		testContext.Fatalf("policy truncation = %#v", result)
+	}
+	for index := 0; index < 4; index++ {
+		if !store.Say("recent", "msg", "say").OK {
+			testContext.Fatal("say failed")
+		}
+	}
+	feed, operationError := store.FeedString("0", "invalid")
+	if operationError != nil || len(feed) != 2 {
+		testContext.Fatalf("default feed = %#v %v", feed, operationError)
+	}
+	feed, operationError = store.Feed(0, 99)
+	if operationError != nil || len(feed) != 3 {
+		testContext.Fatalf("max feed = %#v %v", feed, operationError)
+	}
+	old := Message{ID: 99, Timestamp: float64(now.Add(-2 * time.Minute).Unix()), Who: "old", Text: "old", Kind: "s"}
+	path, _ := store.Path()
+	encoded, _ := json.Marshal(old)
+	if operationError := os.WriteFile(path, append(encoded, '\n'), 0o644); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	members, operationError := store.Members()
+	if operationError != nil || len(members) != 0 {
+		testContext.Fatalf("member window = %#v %v", members, operationError)
+	}
+	if operationError := os.WriteFile(path, []byte(strings.Repeat("x", 513)), 0o644); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if _, operationError := store.Feed(0, 1); operationError == nil {
+		testContext.Fatal("scanner maximum accepted oversized line")
+	}
+}
+func TestNewRejectsMissingDirectoryAndInvalidPolicy(testContext *testing.T) {
+	if _, operationError := New("", testPolicy()); operationError == nil {
+		testContext.Fatal("accepted empty directory")
+	}
+	if _, operationError := New(testContext.TempDir(), Policy{}); operationError == nil {
+		testContext.Fatal("accepted zero policy")
 	}
 }

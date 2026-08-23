@@ -15,12 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rezoch340/any-aicli-remote/backend/internal/compat"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/atomicfile"
 )
 
 const (
-	DefaultAgentPort = 2419
-	DefaultBindHost  = "127.0.0.1"
+	maximumTCPPort             = 65535
+	secretHashPrefixCharacters = 16
 )
 
 var (
@@ -28,6 +28,25 @@ var (
 	ExecutableRequiredError     = errors.New("provider executable required")
 	ProcessIdentityChangedError = errors.New("process identity changed")
 )
+
+// LifecyclePolicy controls managed provider process termination and restart timing.
+// It is supplied by the composition root so process lifecycle behavior has no
+// hidden runtime defaults.
+type LifecyclePolicy struct {
+	KillGrace     time.Duration
+	RestartWait   time.Duration
+	RestartPoll   time.Duration
+	PostKillDelay time.Duration
+	StopWait      time.Duration
+	StopPoll      time.Duration
+}
+
+func (policy LifecyclePolicy) Validate() error {
+	if policy.KillGrace <= 0 || policy.RestartWait <= 0 || policy.RestartPoll <= 0 || policy.PostKillDelay <= 0 || policy.StopWait <= 0 || policy.StopPoll <= 0 {
+		return errors.New("process lifecycle policy durations must be positive")
+	}
+	return nil
+}
 
 // Config describes the one provider agent instance managed by this daemon.
 type Config struct {
@@ -41,6 +60,7 @@ type Config struct {
 	IdentityTokens   []string
 	LogDirectory     string
 	StatePath        string
+	LifecyclePolicy  LifecyclePolicy
 }
 
 // State is persisted so stop/restart can distinguish the managed provider from
@@ -116,7 +136,7 @@ type Operations struct {
 	ProcessAlive     func(processID int) bool
 	ProcessStart     func(processID int) (string, error)
 	StartProcess     func(StartSpecification) (int, error)
-	KillProcess      func(identity ProcessIdentity, gracePeriod time.Duration) error
+	KillProcess      func(identity ProcessIdentity, policy LifecyclePolicy) error
 	Now              func() time.Time
 }
 
@@ -128,33 +148,16 @@ type Manager struct {
 
 func (manager *Manager) configuration() (Config, error) {
 	configuration := manager.Config
-	if configuration.Port == 0 {
-		configuration.Port = DefaultAgentPort
+	if configuration.Port < 1 || configuration.Port > maximumTCPPort {
+		return configuration, errors.New("agent port must be between 1 and 65535")
 	}
-	if strings.TrimSpace(configuration.BindHost) == "" {
-		configuration.BindHost = DefaultBindHost
+	if strings.TrimSpace(configuration.BindHost) == "" || strings.TrimSpace(configuration.Secret) == "" || strings.TrimSpace(configuration.RuntimeDirectory) == "" || strings.TrimSpace(configuration.LogDirectory) == "" || strings.TrimSpace(configuration.StatePath) == "" {
+		return configuration, errors.New("agent configuration requires bind host, secret, runtime, log, and state paths")
 	}
-	if strings.TrimSpace(configuration.RuntimeDirectory) == "" {
-		configuration.RuntimeDirectory = defaultDataPath("run")
-	}
-	if strings.TrimSpace(configuration.LogDirectory) == "" {
-		configuration.LogDirectory = defaultDataPath("logs")
-	}
-	if strings.TrimSpace(configuration.StatePath) == "" {
-		configuration.StatePath = defaultDataPath("agent-state.json")
+	if errorValue := configuration.LifecyclePolicy.Validate(); errorValue != nil {
+		return configuration, errorValue
 	}
 	return configuration, nil
-}
-
-func defaultDataPath(name string) string {
-	if base := compat.Environment("ANY_AI_CLI_REMOTE_DATA_DIR", ""); base != "" {
-		return filepath.Join(base, name)
-	}
-	home, errorValue := os.UserHomeDir()
-	if errorValue != nil || home == "" {
-		return name
-	}
-	return filepath.Join(home, ".any-aicli-remote", name)
 }
 
 func (manager *Manager) operationsWithDefaults() Operations {
@@ -188,7 +191,7 @@ func secretHash(secret string) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(sum[:])[:16]
+	return hex.EncodeToString(sum[:])[:secretHashPrefixCharacters]
 }
 
 func (manager *Manager) LoadState() (*State, error) {
@@ -215,19 +218,11 @@ func (manager *Manager) saveState(state State) error {
 	if errorValue != nil {
 		return errorValue
 	}
-	if errorValue := os.MkdirAll(filepath.Dir(configuration.StatePath), 0o755); errorValue != nil {
-		return errorValue
-	}
 	rawData, errorValue := json.MarshalIndent(state, "", "  ")
 	if errorValue != nil {
 		return errorValue
 	}
-	temporaryPath := configuration.StatePath + ".tmp"
-	defer os.Remove(temporaryPath)
-	if errorValue := os.WriteFile(temporaryPath, rawData, 0o644); errorValue != nil {
-		return errorValue
-	}
-	return os.Rename(temporaryPath, configuration.StatePath)
+	return atomicfile.WritePrivate(configuration.StatePath, append(rawData, '\n'))
 }
 
 func (manager *Manager) removeState() {
@@ -237,8 +232,8 @@ func (manager *Manager) removeState() {
 	}
 }
 
-func cleanupSpawnedProcess(operations Operations, identity ProcessIdentity, primaryError error) error {
-	cleanupError := operations.KillProcess(identity, 4*time.Second)
+func (manager *Manager) cleanupSpawnedProcess(operations Operations, policy LifecyclePolicy, identity ProcessIdentity, primaryError error) error {
+	cleanupError := operations.KillProcess(identity, policy)
 	if cleanupError == nil {
 		return primaryError
 	}
@@ -265,11 +260,11 @@ func (manager *Manager) Start(force bool) (StartResult, error) {
 			if identityError != nil {
 				return StartResult{OK: false, Message: identityError.Error(), Status: status}, identityError
 			}
-			if errorValue := operations.KillProcess(identity, 4*time.Second); errorValue != nil {
+			if errorValue := operations.KillProcess(identity, configuration.LifecyclePolicy); errorValue != nil {
 				return StartResult{OK: false, Message: errorValue.Error(), Status: status}, errorValue
 			}
 		}
-		waitUntil(3*time.Second, 100*time.Millisecond, func() bool {
+		waitUntil(configuration.LifecyclePolicy.RestartWait, configuration.LifecyclePolicy.RestartPoll, func() bool {
 			value := manager.Status()
 			return len(value.OwnedProcessIDs) == 0
 		})
@@ -291,7 +286,7 @@ func (manager *Manager) Start(force bool) (StartResult, error) {
 		return StartResult{OK: false, Message: ExecutableRequiredError.Error(), Status: status}, ExecutableRequiredError
 	}
 	arguments := append([]string(nil), configuration.Arguments...)
-	if errorValue := os.MkdirAll(configuration.LogDirectory, 0o755); errorValue != nil {
+	if errorValue := os.MkdirAll(configuration.LogDirectory, 0o700); errorValue != nil {
 		return StartResult{OK: false, Message: errorValue.Error(), Status: status}, errorValue
 	}
 	if errorValue := os.MkdirAll(configuration.RuntimeDirectory, 0o700); errorValue != nil {
@@ -313,12 +308,12 @@ func (manager *Manager) Start(force bool) (StartResult, error) {
 			processStartError = errors.New("could not identify spawned agent process")
 		}
 		identity := ProcessIdentity{ProcessID: processID, ExecutablePath: executablePath, IdentityTokens: append([]string(nil), configuration.IdentityTokens...)}
-		combinedError := cleanupSpawnedProcess(operations, identity, processStartError)
+		combinedError := manager.cleanupSpawnedProcess(operations, configuration.LifecyclePolicy, identity, processStartError)
 		return StartResult{OK: false, Message: combinedError.Error(), Status: status}, combinedError
 	}
 	state := State{ProcessID: processID, Port: configuration.Port, BindHost: configuration.BindHost, RuntimeDirectory: configuration.RuntimeDirectory, ExecutablePath: executablePath, Arguments: redactArguments(arguments, configuration.Secret), IdentityTokens: append([]string(nil), configuration.IdentityTokens...), SecretHash: secretHash(configuration.Secret), StartedAt: operations.Now().UTC().Format(time.RFC3339Nano), ProcessStart: strings.TrimSpace(processStartStamp)}
 	if errorValue := manager.saveState(state); errorValue != nil {
-		combinedError := cleanupSpawnedProcess(operations, processIdentityFromState(&state, configuration), errorValue)
+		combinedError := manager.cleanupSpawnedProcess(operations, configuration.LifecyclePolicy, processIdentityFromState(&state, configuration), errorValue)
 		return StartResult{OK: false, Message: combinedError.Error(), Status: status}, combinedError
 	}
 	return StartResult{OK: true, Message: fmt.Sprintf("agent started on :%d", configuration.Port), Started: true, ProcessID: processID, Status: manager.Status()}, nil
@@ -391,7 +386,7 @@ func (manager *Manager) Stop() (StopResult, error) {
 		if identityError != nil {
 			return StopResult{OK: false, Message: identityError.Error(), Killed: killed, Status: status}, identityError
 		}
-		if errorValue := operations.KillProcess(identity, 4*time.Second); errorValue != nil {
+		if errorValue := operations.KillProcess(identity, configuration.LifecyclePolicy); errorValue != nil {
 			return StopResult{OK: false, Message: errorValue.Error(), Killed: killed, Status: status}, errorValue
 		}
 		killed = append(killed, processID)
@@ -417,7 +412,7 @@ func StartProcess(specification StartSpecification) (int, error) {
 	if logPath == "" {
 		logPath = filepath.Join(os.TempDir(), "provider-agent.spawn.log")
 	}
-	if errorValue := os.MkdirAll(filepath.Dir(logPath), 0o755); errorValue != nil {
+	if errorValue := os.MkdirAll(filepath.Dir(logPath), 0o700); errorValue != nil {
 		return 0, errorValue
 	}
 	logFile, errorValue := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)

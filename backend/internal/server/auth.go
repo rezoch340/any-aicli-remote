@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/rezoch340/any-aicli-remote/backend/internal/compat"
 )
 
-func authMiddleware(secret string, next http.Handler) http.Handler {
+func authMiddleware(secret string, cookieMaxAge int, next http.Handler) http.Handler {
 	if next == nil {
 		next = http.NotFoundHandler()
 	}
@@ -37,7 +36,7 @@ func authMiddleware(secret string, next http.Handler) http.Handler {
 				Name:     compat.AuthenticationCookieName,
 				Value:    secret,
 				Path:     "/",
-				MaxAge:   int((30 * 24 * time.Hour) / time.Second),
+				MaxAge:   cookieMaxAge,
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
 			})

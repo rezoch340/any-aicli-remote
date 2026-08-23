@@ -18,6 +18,8 @@ import (
 	"github.com/rezoch340/any-aicli-remote/backend/internal/terminalexec"
 )
 
+const terminalMinimumOutputBytes = 1024
+
 type limitedBuffer struct {
 	accessMutex sync.Mutex
 	data        []byte
@@ -26,8 +28,8 @@ type limitedBuffer struct {
 }
 
 func newLimitedBuffer(limit int) *limitedBuffer {
-	if limit < 1024 {
-		limit = 1024
+	if limit < terminalMinimumOutputBytes {
+		limit = terminalMinimumOutputBytes
 	}
 	return &limitedBuffer{limit: limit}
 }
@@ -122,14 +124,16 @@ func (terminalInstance *terminal) kill() {
 }
 
 type terminalManager struct {
-	accessMutex sync.RWMutex
-	next        uint64
-	entries     map[string]*terminal
-	closed      atomic.Bool
+	accessMutex        sync.RWMutex
+	next               uint64
+	entries            map[string]*terminal
+	closed             atomic.Bool
+	defaultOutputBytes int64
+	filesystemPolicy   fsapi.Policy
 }
 
-func newTerminalManager() *terminalManager {
-	return &terminalManager{entries: make(map[string]*terminal)}
+func newTerminalManager(defaultOutputBytes int64, filesystemPolicy fsapi.Policy) *terminalManager {
+	return &terminalManager{entries: make(map[string]*terminal), defaultOutputBytes: defaultOutputBytes, filesystemPolicy: filesystemPolicy}
 }
 
 func (managerInstance *terminalManager) create(params map[string]any, sessionIdentifier, sessionWorkingDirectory string) (map[string]any, error) {
@@ -153,7 +157,7 @@ func (managerInstance *terminalManager) createPinned(params map[string]any, sess
 		return nil, errors.New("command required")
 	}
 	arguments := stringSlice(params["args"])
-	filesystem, operationError := fsapi.NewPinned(rootIdentity)
+	filesystem, operationError := fsapi.NewPinned(rootIdentity, managerInstance.filesystemPolicy)
 	if operationError != nil {
 		return nil, operationError
 	}
@@ -163,7 +167,7 @@ func (managerInstance *terminalManager) createPinned(params map[string]any, sess
 		return nil, operationError
 	}
 	defer workingDirectoryFile.Close()
-	limit := intValue(params["outputByteLimit"], 1_048_576)
+	limit := intValue(params["outputByteLimit"], int(managerInstance.defaultOutputBytes))
 
 	commandProcess, operationError := terminalexec.Command(command, arguments, workingDirectoryFile)
 	if operationError != nil {

@@ -2,11 +2,8 @@ package server
 
 import (
 	"errors"
-	"net/http"
-	"time"
-
-	"github.com/rezoch340/any-aicli-remote/backend/internal/room"
 	"github.com/rezoch340/any-aicli-remote/backend/internal/voice"
+	"net/http"
 )
 
 func (server *Server) handleRoomFeed(responseWriter http.ResponseWriter, request *http.Request) {
@@ -19,7 +16,7 @@ func (server *Server) handleRoomFeed(responseWriter http.ResponseWriter, request
 	if len(messages) > 0 {
 		last = messages[len(messages)-1].ID
 	}
-	writeJSON(responseWriter, http.StatusOK, map[string]any{"ok": true, "messages": messages, "last": last, "limit": room.Limit})
+	writeJSON(responseWriter, http.StatusOK, map[string]any{"ok": true, "messages": messages, "last": last, "limit": server.room.Policy().MessageRuneLimit})
 }
 
 func (server *Server) handleRoomSay(responseWriter http.ResponseWriter, request *http.Request) {
@@ -28,7 +25,9 @@ func (server *Server) handleRoomSay(responseWriter http.ResponseWriter, request 
 		Text string `json:"text"`
 		Kind string `json:"kind"`
 	}
-	decodeLooseJSON(request, &body)
+	if !server.decodeLooseJSON(responseWriter, request, &body) {
+		return
+	}
 	result := server.room.Say(firstNonEmpty(body.Who, request.URL.Query().Get("who"), "agent"), firstNonEmpty(body.Text, request.URL.Query().Get("text")), firstNonEmpty(body.Kind, "say"))
 	status := http.StatusOK
 	if !result.OK {
@@ -41,7 +40,7 @@ func (server *Server) handleRoomSay(responseWriter http.ResponseWriter, request 
 }
 
 func (server *Server) handleRoomMembers(responseWriter http.ResponseWriter, _ *http.Request) {
-	members, errorValue := server.room.Members(15 * time.Minute)
+	members, errorValue := server.room.Members()
 	if errorValue != nil {
 		writeAPIError(responseWriter, http.StatusInternalServerError, errorValue)
 		return
@@ -63,7 +62,9 @@ func (server *Server) handleVoiceStatus(responseWriter http.ResponseWriter, _ *h
 
 func (server *Server) handleTTS(responseWriter http.ResponseWriter, request *http.Request) {
 	var input voice.Request
-	decodeLooseJSON(request, &input)
+	if !server.decodeLooseJSON(responseWriter, request, &input) {
+		return
+	}
 	audio, errorValue := server.voice.Synthesize(request.Context(), input)
 	if errorValue != nil {
 		switch {
@@ -81,7 +82,7 @@ func (server *Server) handleTTS(responseWriter http.ResponseWriter, request *htt
 				writeJSON(responseWriter, status, map[string]any{"ok": false, "error": upstream.Error(), "status": upstream.Status})
 				return
 			}
-			writeJSON(responseWriter, http.StatusBadGateway, map[string]any{"ok": false, "error": truncate(errorValue.Error(), 300)})
+			writeJSON(responseWriter, http.StatusBadGateway, map[string]any{"ok": false, "error": truncate(errorValue.Error(), server.configuration.Canonical.Tuning.HTTP.ErrorResponseMaxRunes)})
 		}
 		return
 	}

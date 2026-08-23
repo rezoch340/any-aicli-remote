@@ -16,7 +16,7 @@ func (server *Server) handleLoopsList(responseWriter http.ResponseWriter, reques
 
 func (server *Server) handleLoopsCreate(responseWriter http.ResponseWriter, request *http.Request) {
 	var body map[string]any
-	if errorValue := decodeJSON(responseWriter, request, &body, false); errorValue != nil {
+	if errorValue := server.decodeJSON(responseWriter, request, &body, false); errorValue != nil {
 		return
 	}
 	sessionID := strings.TrimSpace(stringValue(body["sessionId"]))
@@ -32,7 +32,7 @@ func (server *Server) handleLoopsCreate(responseWriter http.ResponseWriter, requ
 	if interval == nil {
 		interval = body["every"]
 	}
-	seconds, label, errorValue := loopInterval(interval)
+	seconds, label, errorValue := loopInterval(server.loops.Policy(), interval)
 	if errorValue != nil {
 		writeText(responseWriter, http.StatusBadRequest, "bad interval")
 		return
@@ -52,7 +52,9 @@ func (server *Server) handleLoopsCreate(responseWriter http.ResponseWriter, requ
 
 func (server *Server) handleLoopsStop(responseWriter http.ResponseWriter, request *http.Request) {
 	var body map[string]any
-	decodeLooseJSON(request, &body)
+	if !server.decodeLooseJSON(responseWriter, request, &body) {
+		return
+	}
 	identifier := firstNonEmpty(stringValue(body["id"]), request.URL.Query().Get("id"))
 	sessionID := firstNonEmpty(stringValue(body["sessionId"]), request.URL.Query().Get("sessionId"))
 	removed, errorValue := server.loops.Stop(identifier, sessionID)
@@ -63,9 +65,13 @@ func (server *Server) handleLoopsStop(responseWriter http.ResponseWriter, reques
 	writeJSON(responseWriter, http.StatusOK, map[string]any{"ok": true, "removed": removed, "count": len(removed)})
 }
 
+func (server *Server) providerRequestContext(request *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(request.Context(), server.configuration.Canonical.Tuning.HTTP.ProviderRequestTimeout.Duration)
+}
+
 func (server *Server) handleEffort(responseWriter http.ResponseWriter, request *http.Request) {
 	var body map[string]any
-	if errorValue := decodeJSON(responseWriter, request, &body, false); errorValue != nil {
+	if errorValue := server.decodeJSON(responseWriter, request, &body, false); errorValue != nil {
 		return
 	}
 	sessionID := strings.TrimSpace(stringValue(body["sessionId"]))
@@ -84,7 +90,7 @@ func (server *Server) handleEffort(responseWriter http.ResponseWriter, request *
 	if effort == "max" {
 		effort = "xhigh"
 	}
-	executionContext, cancel := context.WithTimeout(request.Context(), 30*time.Second)
+	executionContext, cancel := server.providerRequestContext(request)
 	method, params := server.protocol.EffortRequest(sessionID, model, effort)
 	response, errorValue := server.hub.CallRPC(executionContext, method, params)
 	cancel()
@@ -99,26 +105,27 @@ func (server *Server) handleEffort(responseWriter http.ResponseWriter, request *
 	writeJSON(responseWriter, http.StatusOK, map[string]any{"ok": true, "effort": requested, "modelId": model, "result": response["result"]})
 }
 
-func loopInterval(raw any) (int, string, error) {
+func loopInterval(policy loops.Policy, raw any) (int, string, error) {
 	if raw == nil || strings.TrimSpace(stringValue(raw)) == "" {
-		return loops.ParseInterval("5m")
+		seconds, label := policy.NormalizeInterval(int(policy.DefaultInterval / time.Second))
+		return seconds, label, nil
 	}
 	switch value := raw.(type) {
 	case float64:
-		seconds, label := loops.NormalizeInterval(int(value))
+		seconds, label := policy.NormalizeInterval(int(value))
 		return seconds, label, nil
 	case int:
-		seconds, label := loops.NormalizeInterval(value)
+		seconds, label := policy.NormalizeInterval(value)
 		return seconds, label, nil
 	case json.Number:
 		if count, errorValue := value.Int64(); errorValue == nil {
-			seconds, label := loops.NormalizeInterval(int(count))
+			seconds, label := policy.NormalizeInterval(int(count))
 			return seconds, label, nil
 		}
 		if count, errorValue := value.Float64(); errorValue == nil {
-			seconds, label := loops.NormalizeInterval(int(count))
+			seconds, label := policy.NormalizeInterval(int(count))
 			return seconds, label, nil
 		}
 	}
-	return loops.ParseInterval(stringValue(raw))
+	return policy.ParseInterval(stringValue(raw))
 }

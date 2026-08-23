@@ -20,6 +20,7 @@ type Hub struct {
 	catalog     providerapi.Provider
 	protocol    providerapi.ProtocolAdapter
 	logger      *slog.Logger
+	policy      Policy
 
 	upgrader websocket.Upgrader
 
@@ -58,7 +59,10 @@ type Hub struct {
 	pendingTimeout     time.Duration
 }
 
-func New(agentURL string, catalog providerapi.Provider, protocol providerapi.ProtocolAdapter, ensureAgent EnsureAgentFunc, logger *slog.Logger) *Hub {
+func New(agentURL string, catalog providerapi.Provider, protocol providerapi.ProtocolAdapter, ensureAgent EnsureAgentFunc, policy Policy, logger *slog.Logger) (*Hub, error) {
+	if validationError := policy.Validate(); validationError != nil {
+		return nil, validationError
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -69,9 +73,10 @@ func New(agentURL string, catalog providerapi.Provider, protocol providerapi.Pro
 		catalog:     catalog,
 		protocol:    protocol,
 		logger:      logger,
+		policy:      policy,
 		upgrader: websocket.Upgrader{
-			ReadBufferSize:  64 * 1024,
-			WriteBufferSize: 64 * 1024,
+			ReadBufferSize:  policy.ReadBufferBytes,
+			WriteBufferSize: policy.WriteBufferBytes,
 		},
 		clients:            make(map[*clientConnection]struct{}),
 		pending:            make(map[int64]pendingRequest),
@@ -79,16 +84,16 @@ func New(agentURL string, catalog providerapi.Provider, protocol providerapi.Pro
 		reverseRequests:    make(map[string]reverseRequestRoute),
 		sessionClients:     make(map[string]map[*clientConnection]struct{}),
 		sessions:           make(map[string]sessionWorkspaceBinding),
-		terminals:          newTerminalManager(),
+		terminals:          newTerminalManager(policy.TerminalOutputBytes, policy.FilesystemPolicy),
 		lifetimeContext:    lifetimeContext,
 		lifetimeCancel:     lifetimeCancel,
 		closeComplete:      make(chan struct{}),
-		heartbeatInterval:  20 * time.Second,
-		clientReadTimeout:  60 * time.Second,
-		pendingLimit:       defaultPendingRequestLimit,
-		pendingClientLimit: defaultPendingClientRequestLimit,
-		pendingTimeout:     defaultPendingRequestTimeout,
-	}
+		heartbeatInterval:  policy.Heartbeat,
+		clientReadTimeout:  policy.ClientReadTimeout,
+		pendingLimit:       policy.PendingLimit,
+		pendingClientLimit: policy.PendingClientLimit,
+		pendingTimeout:     policy.PendingTimeout,
+	}, nil
 }
 
 func (hubInstance *Hub) Start(parent context.Context) {
@@ -162,6 +167,9 @@ func (hubInstance *Hub) InitCached() bool {
 	return hubInstance.initCached
 }
 
+// Policy returns the immutable resource policy configured for this Hub.
+func (hubInstance *Hub) Policy() Policy { return hubInstance.policy }
+
 func (hubInstance *Hub) LastError() string {
 	hubInstance.agentMutex.RLock()
 	defer hubInstance.agentMutex.RUnlock()
@@ -185,8 +193,8 @@ func (hubInstance *Hub) DisconnectAgent(reason string) {
 }
 
 func (hubInstance *Hub) watch(operationContext context.Context) {
-	ensureTicker := time.NewTicker(5 * time.Second)
-	heartbeatTicker := time.NewTicker(15 * time.Second)
+	ensureTicker := time.NewTicker(hubInstance.policy.WatcherEnsureInterval)
+	heartbeatTicker := time.NewTicker(hubInstance.policy.StateBroadcastInterval)
 	defer ensureTicker.Stop()
 	defer heartbeatTicker.Stop()
 	for {
@@ -195,7 +203,7 @@ func (hubInstance *Hub) watch(operationContext context.Context) {
 			return
 		case <-ensureTicker.C:
 			if !hubInstance.AgentConnected() {
-				attempt, cancel := context.WithTimeout(operationContext, 12*time.Second)
+				attempt, cancel := context.WithTimeout(operationContext, hubInstance.policy.EnsureAttempt)
 				_ = hubInstance.Ensure(attempt)
 				cancel()
 			}

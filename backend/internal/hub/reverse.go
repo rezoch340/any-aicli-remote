@@ -13,10 +13,7 @@ import (
 	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
 
-const (
-	maxReadSize            = 2_000_000
-	reverseResponseTimeout = 2 * time.Minute
-)
+const reverseFileReaderBufferBytes = 64 * 1024
 
 type reverseRequestRoute struct {
 	identifier      any
@@ -87,14 +84,14 @@ func (hubInstance *Hub) handleReverse(
 			operationError = workspaceError
 			break
 		}
-		result, operationError = readTextFilePinned(params, rootIdentity)
+		result, operationError = readTextFilePinned(params, rootIdentity, hubInstance.policy.ReverseReadBytes, hubInstance.policy.FilesystemPolicy)
 	case providerapi.WriteFileOperation:
 		rootIdentity, workspaceError := hubInstance.resolveToolWorkspace(reverseRequest.SessionID)
 		if workspaceError != nil {
 			operationError = workspaceError
 			break
 		}
-		result, operationError = writeTextFilePinned(params, rootIdentity)
+		result, operationError = writeTextFilePinned(params, rootIdentity, hubInstance.policy.FilesystemPolicy)
 	case providerapi.CreateTerminalOperation:
 		rootIdentity, workspaceError := hubInstance.resolveToolWorkspace(reverseRequest.SessionID)
 		if workspaceError != nil {
@@ -197,7 +194,7 @@ func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID s
 }
 
 func (hubInstance *Hub) expireReverseRequest(routeKey string) {
-	timer := time.NewTimer(reverseResponseTimeout)
+	timer := time.NewTimer(hubInstance.policy.ReverseOperationTimeout)
 	defer timer.Stop()
 	select {
 	case <-hubInstance.lifetimeContext.Done():
@@ -237,20 +234,20 @@ func (hubInstance *Hub) resolveToolWorkspace(sessionID string) (*fsapi.RootIdent
 	return hubInstance.ResolveSessionRoot(hubInstance.lifetimeContext, "", sessionID)
 }
 
-func readTextFile(params map[string]any, workingDirectory string) (map[string]any, error) {
+func readTextFile(params map[string]any, workingDirectory string, limitBytes int64) (map[string]any, error) {
 	rootIdentity, operationError := fsapi.PinRoot(workingDirectory)
 	if operationError != nil {
 		return nil, operationError
 	}
-	return readTextFilePinned(params, rootIdentity)
+	return readTextFilePinned(params, rootIdentity, limitBytes, fsapi.Policy{MaxReadBytes: limitBytes, MaxWriteBytes: limitBytes, MaxListItems: 1})
 }
 
-func readTextFilePinned(params map[string]any, rootIdentity *fsapi.RootIdentity) (map[string]any, error) {
+func readTextFilePinned(params map[string]any, rootIdentity *fsapi.RootIdentity, limitBytes int64, policy fsapi.Policy) (map[string]any, error) {
 	rawPath := stringValue(params["path"])
 	if rawPath == "" {
 		return nil, errors.New("path required")
 	}
-	filesystem, operationError := fsapi.NewPinned(rootIdentity)
+	filesystem, operationError := fsapi.NewPinned(rootIdentity, policy)
 	if operationError != nil {
 		return nil, operationError
 	}
@@ -272,15 +269,15 @@ func readTextFilePinned(params map[string]any, rootIdentity *fsapi.RootIdentity)
 	if limitProvided && limit == 0 {
 		return map[string]any{"content": ""}, nil
 	}
-	reader := bufio.NewReaderSize(file, 64*1024)
+	reader := bufio.NewReaderSize(file, reverseFileReaderBufferBytes)
 	var builder strings.Builder
 	line := 1
 	writtenLines := 0
 	for {
 		fragment, operationError := reader.ReadString('\n')
 		include := line >= start && (!limitProvided || writtenLines < limit)
-		if include && builder.Len() < maxReadSize {
-			remaining := maxReadSize - builder.Len()
+		if include && int64(builder.Len()) < limitBytes {
+			remaining := int(limitBytes - int64(builder.Len()))
 			if len(fragment) > remaining {
 				fragment = fragment[:remaining]
 			}
@@ -289,7 +286,7 @@ func readTextFilePinned(params map[string]any, rootIdentity *fsapi.RootIdentity)
 		if include {
 			writtenLines++
 		}
-		if builder.Len() >= maxReadSize || (limitProvided && writtenLines >= limit) {
+		if int64(builder.Len()) >= limitBytes || (limitProvided && writtenLines >= limit) {
 			break
 		}
 		if operationError != nil {
@@ -303,20 +300,12 @@ func readTextFilePinned(params map[string]any, rootIdentity *fsapi.RootIdentity)
 	return map[string]any{"content": strings.ToValidUTF8(builder.String(), "�")}, nil
 }
 
-func writeTextFile(params map[string]any, workingDirectory string) (map[string]any, error) {
-	rootIdentity, operationError := fsapi.PinRoot(workingDirectory)
-	if operationError != nil {
-		return nil, operationError
-	}
-	return writeTextFilePinned(params, rootIdentity)
-}
-
-func writeTextFilePinned(params map[string]any, rootIdentity *fsapi.RootIdentity) (map[string]any, error) {
+func writeTextFilePinned(params map[string]any, rootIdentity *fsapi.RootIdentity, policy fsapi.Policy) (map[string]any, error) {
 	rawPath := stringValue(params["path"])
 	if rawPath == "" {
 		return nil, errors.New("path required")
 	}
-	filesystem, operationError := fsapi.NewPinned(rootIdentity)
+	filesystem, operationError := fsapi.NewPinned(rootIdentity, policy)
 	if operationError != nil {
 		return nil, operationError
 	}

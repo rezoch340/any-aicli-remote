@@ -18,6 +18,7 @@ type fakeOS struct {
 	alive         map[int]bool
 	starts        map[int]string
 	killed        []int
+	killPolicies  []LifecyclePolicy
 	started       []StartSpecification
 	nextProcessID int
 }
@@ -67,8 +68,9 @@ func (fakeSystem *fakeOS) operations() Operations {
 			fakeSystem.commands[processID] = specification.Path + " " + strings.Join(specification.Arguments, " ")
 			return processID, nil
 		},
-		KillProcess: func(identity ProcessIdentity, _ time.Duration) error {
+		KillProcess: func(identity ProcessIdentity, policy LifecyclePolicy) error {
 			fakeSystem.killed = append(fakeSystem.killed, identity.ProcessID)
+			fakeSystem.killPolicies = append(fakeSystem.killPolicies, policy)
 			fakeSystem.alive[identity.ProcessID] = false
 			for port, processIDs := range fakeSystem.listeners {
 				output := processIDs[:0]
@@ -88,7 +90,31 @@ func (fakeSystem *fakeOS) operations() Operations {
 func testManager(testContext *testing.T, fakeSystem *fakeOS) *Manager {
 	testContext.Helper()
 	directoryPath := testContext.TempDir()
-	return &Manager{Config: Config{Port: 2419, BindHost: "127.0.0.1", Secret: "sekret", RuntimeDirectory: directoryPath, ExecutablePath: "/usr/local/bin/provider-agent", Arguments: []string{"agent", "serve", "--bind", "127.0.0.1:2419", "--secret", "sekret"}, IdentityTokens: []string{"agent", "serve", "127.0.0.1:2419"}, LogDirectory: filepath.Join(directoryPath, "logs"), StatePath: filepath.Join(directoryPath, "state.json")}, Operations: fakeSystem.operations()}
+	return &Manager{Config: Config{Port: 2419, BindHost: "127.0.0.1", Secret: "sekret", RuntimeDirectory: directoryPath, ExecutablePath: "/usr/local/bin/provider-agent", Arguments: []string{"agent", "serve", "--bind", "127.0.0.1:2419", "--secret", "sekret"}, IdentityTokens: []string{"agent", "serve", "127.0.0.1:2419"}, LogDirectory: filepath.Join(directoryPath, "logs"), StatePath: filepath.Join(directoryPath, "state.json"), LifecyclePolicy: LifecyclePolicy{KillGrace: time.Second, RestartWait: time.Second, RestartPoll: time.Millisecond, PostKillDelay: time.Millisecond, StopWait: time.Second, StopPoll: time.Millisecond}}, Operations: fakeSystem.operations()}
+}
+
+func TestManagerRejectsMissingLifecyclePolicy(testContext *testing.T) {
+	manager := testManager(testContext, newFakeOS())
+	manager.Config.LifecyclePolicy = LifecyclePolicy{}
+	if _, operationError := manager.Start(false); operationError == nil {
+		testContext.Fatal("Start accepted missing lifecycle policy")
+	}
+}
+
+func TestForceRestartUsesConfiguredLifecyclePolicy(testContext *testing.T) {
+	fakeSystem := newFakeOS()
+	manager := testManager(testContext, fakeSystem)
+	policy := LifecyclePolicy{KillGrace: 17 * time.Millisecond, RestartWait: 19 * time.Millisecond, RestartPoll: 2 * time.Millisecond, PostKillDelay: 3 * time.Millisecond, StopWait: 23 * time.Millisecond, StopPoll: 4 * time.Millisecond}
+	manager.Config.LifecyclePolicy = policy
+	if _, operationError := manager.Start(false); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if _, operationError := manager.Start(true); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	if !reflect.DeepEqual(fakeSystem.killPolicies, []LifecyclePolicy{policy}) {
+		testContext.Fatalf("kill policies = %#v, expected %#v", fakeSystem.killPolicies, []LifecyclePolicy{policy})
+	}
 }
 
 func TestStartRefusesForeignListener(testContext *testing.T) {
@@ -171,7 +197,7 @@ func TestStartReturnsCleanupFailure(testContext *testing.T) {
 	identityFailure := errors.New("identity unavailable")
 	cleanupFailure := errors.New("cleanup failed")
 	manager.Operations.ProcessStart = func(int) (string, error) { return "", identityFailure }
-	manager.Operations.KillProcess = func(ProcessIdentity, time.Duration) error { return cleanupFailure }
+	manager.Operations.KillProcess = func(ProcessIdentity, LifecyclePolicy) error { return cleanupFailure }
 
 	result, errorValue := manager.Start(false)
 	if result.OK || !errors.Is(errorValue, identityFailure) || !errors.Is(errorValue, cleanupFailure) {
@@ -197,7 +223,7 @@ func TestStartReturnsCleanupFailureWhenStateSaveFails(testContext *testing.T) {
 		return processID, startError
 	}
 	cleanupFailure := errors.New("cleanup failed")
-	manager.Operations.KillProcess = func(ProcessIdentity, time.Duration) error { return cleanupFailure }
+	manager.Operations.KillProcess = func(ProcessIdentity, LifecyclePolicy) error { return cleanupFailure }
 
 	result, errorValue := manager.Start(false)
 	if result.OK || errorValue == nil || !errors.Is(errorValue, cleanupFailure) {
@@ -402,5 +428,19 @@ func TestStartProcessRedactsChildOutputAndProtectsLog(testContext *testing.T) {
 	}
 	if fileInfo.Mode().Perm() != 0o600 {
 		testContext.Fatalf("child log permissions = %o", fileInfo.Mode().Perm())
+	}
+}
+
+func TestStartCreatesPrivateLogDirectory(testingContext *testing.T) {
+	manager := testManager(testingContext, newFakeOS())
+	if _, operationError := manager.Start(false); operationError != nil {
+		testingContext.Fatal(operationError)
+	}
+	information, operationError := os.Stat(manager.Config.LogDirectory)
+	if operationError != nil {
+		testingContext.Fatal(operationError)
+	}
+	if information.Mode().Perm() != 0o700 {
+		testingContext.Fatalf("log directory mode = %o", information.Mode().Perm())
 	}
 }

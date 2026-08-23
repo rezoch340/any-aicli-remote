@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/rezoch340/any-aicli-remote/backend/internal/loops"
 	processapi "github.com/rezoch340/any-aicli-remote/backend/internal/process"
 )
 
@@ -81,7 +80,7 @@ func (delayedAgentEnvironment *delayedAgentOS) operations() processapi.Operation
 			go delayedAgentEnvironment.serveAfterDelay(processID)
 			return processID, nil
 		},
-		KillProcess: func(identity processapi.ProcessIdentity, _ time.Duration) error {
+		KillProcess: func(identity processapi.ProcessIdentity, _ processapi.LifecyclePolicy) error {
 			delayedAgentEnvironment.mutex.Lock()
 			delayedAgentEnvironment.alive[identity.ProcessID] = false
 			delayedAgentEnvironment.mutex.Unlock()
@@ -256,7 +255,7 @@ func TestServerRunWithPersistedLoopDoesNotSendProviderRPCAtStartup(testingContex
 	fixture.server.configuration.EnsureAgent = true
 	testingContext.Cleanup(fake.close)
 
-	if _, operationError := fixture.server.loops.Create("persisted-session", "scheduled prompt", loops.MinInterval, "", ""); operationError != nil {
+	if _, operationError := fixture.server.loops.Create("persisted-session", "scheduled prompt", 60, "", ""); operationError != nil {
 		testingContext.Fatal(operationError)
 	}
 	executionContext, cancel := context.WithCancel(context.Background())

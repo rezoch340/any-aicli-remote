@@ -6,13 +6,16 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
+
+	"github.com/rezoch340/any-aicli-remote/backend/internal/voice"
 
 	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
 
 func TestFactoryBuildsCompleteGrokComponents(testContext *testing.T) {
 	sessionsDirectory := filepath.Join(testContext.TempDir(), "sessions")
-	components, operationError := New(Configuration{
+	components, operationError := New(Configuration{HistoryPolicy: testHistoryPolicy(), VoicePolicy: testVoicePolicy(),
 		ProviderID: DefaultProviderID,
 		Options: map[string]string{
 			SessionsDirectoryOption: sessionsDirectory,
@@ -44,7 +47,7 @@ func TestFactoryRequiresExplicitAutomaticApproval(testContext *testing.T) {
 	}
 	for _, testCase := range testCases {
 		testContext.Run(testCase.name, func(testContext *testing.T) {
-			components, operationError := New(Configuration{
+			components, operationError := New(Configuration{HistoryPolicy: testHistoryPolicy(), VoicePolicy: testVoicePolicy(),
 				ProviderID: DefaultProviderID, ExecutablePath: executablePath, Options: testCase.options,
 			})
 			if operationError != nil {
@@ -91,11 +94,25 @@ func TestOptionParserOwnsProviderFlagsAndCompatibilityAliases(testContext *testi
 	}
 }
 
+func TestFactoryRejectsZeroVoicePolicy(testContext *testing.T) {
+	if _, errorValue := New(Configuration{HistoryPolicy: testHistoryPolicy()}); errorValue == nil {
+		testContext.Fatal("zero voice policy accepted")
+	}
+}
+
 func TestFactoryRejectsInvalidProviderConfiguration(testContext *testing.T) {
-	if _, operationError := New(Configuration{ProviderID: "missing"}); operationError == nil {
+	if _, operationError := New(Configuration{HistoryPolicy: testHistoryPolicy(), VoicePolicy: testVoicePolicy(), ProviderID: "missing"}); operationError == nil {
 		testContext.Fatal("unsupported provider was accepted")
 	}
-	if _, operationError := New(Configuration{Options: map[string]string{LeaderOption: "perhaps"}}); operationError == nil {
+	if _, operationError := New(Configuration{HistoryPolicy: testHistoryPolicy(), VoicePolicy: testVoicePolicy(), Options: map[string]string{LeaderOption: "perhaps"}}); operationError == nil {
 		testContext.Fatal("invalid boolean option was accepted")
 	}
+}
+
+func testHistoryPolicy() providerapi.HistoryPolicy {
+	return providerapi.HistoryPolicy{DefaultLimit: 100, LiveLimit: 400, MinLimit: 20, MaxLimit: 4000, DefaultMaxBytes: 400000, LiveMaxBytes: 512000, BeforeMaxBytes: 1200000, MinMaxBytes: 64000, MaxMaxBytes: 12000000, AdapterEventLimit: 1600, AdapterReadBytes: 8000000, TitleBatchLimit: 250, ChatTextMaxRunes: 120000, MessageScanInitialBytes: 64 * 1024, MessageScanMaxBytes: 8 * 1024 * 1024, MetadataTitleMaxRunes: 80, MetadataSummaryMaxRunes: 160, RenameTitleMaxRunes: 160}
+}
+
+func testVoicePolicy() voice.Policy {
+	return voice.Policy{RequestTimeout: time.Second, TextMaxRunes: 15000, TruncatedTextRunes: 14990, SuccessBodyMaxBytes: 1024, ErrorBodyMaxBytes: 1024, ErrorBodyMaxRunes: 400}
 }

@@ -1,6 +1,8 @@
 package skills
 
 import (
+	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,10 @@ func write(testContext *testing.T, path, body string) {
 	if operationError := os.WriteFile(path, []byte(body), 0o644); operationError != nil {
 		testContext.Fatal(operationError)
 	}
+}
+
+func testPolicy() Policy {
+	return Policy{MaxFileBytes: 1 << 20, DescriptionMaxRunes: 240, MaxItems: 2000}
 }
 
 func declaredRoot(path string, kind providerapi.SkillRootKind, source providerapi.SkillRootSource) providerapi.SkillRoot {
@@ -57,7 +63,7 @@ func TestScanSkillsAndCommands(testContext *testing.T) {
 		declaredRoot(filepath.Join(globalDirectory, "installed-plugins"), providerapi.SkillRootKindSkill, providerapi.SkillRootSourcePlugin),
 		declaredRoot(filepath.Join(workingDirectory, "commands"), providerapi.SkillRootKindCommand, providerapi.SkillRootSourceCommand),
 	}
-	items, operationError := Scan(configuredRoots)
+	items, operationError := Scan(configuredRoots, testPolicy())
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -90,7 +96,7 @@ func TestScanDeduplicatesCaseInsensitiveNames(testContext *testing.T) {
 	items, operationError := Scan([]providerapi.SkillRoot{
 		declaredRoot(firstRoot, providerapi.SkillRootKindSkill, providerapi.SkillRootSourceUser),
 		declaredRoot(secondRoot, providerapi.SkillRootKindSkill, providerapi.SkillRootSourceUser),
-	})
+	}, testPolicy())
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -125,7 +131,7 @@ func TestScanRejectsSymlinkedMetadataFiles(testContext *testing.T) {
 	items, operationError := Scan([]providerapi.SkillRoot{
 		declaredRoot(filepath.Join(root, "skills"), providerapi.SkillRootKindSkill, providerapi.SkillRootSourceUser),
 		declaredRoot(filepath.Join(root, "commands"), providerapi.SkillRootKindCommand, providerapi.SkillRootSourceCommand),
-	})
+	}, testPolicy())
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -144,7 +150,7 @@ func TestScanCanonicalizesConfiguredRootSymlink(testContext *testing.T) {
 	}
 	items, operationError := Scan([]providerapi.SkillRoot{
 		declaredRoot(configuredRoot, providerapi.SkillRootKindSkill, providerapi.SkillRootSourceUser),
-	})
+	}, testPolicy())
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -162,7 +168,7 @@ func TestScanUsesDeclaredSourceInsteadOfWorkspacePathSegments(testContext *testi
 	write(testContext, filepath.Join(workspaceRoot, "local", "SKILL.md"), "---\nname: workspace-skill\n---\n")
 	items, operationError := Scan([]providerapi.SkillRoot{
 		declaredRoot(workspaceRoot, providerapi.SkillRootKindSkill, providerapi.SkillRootSourceUser),
-	})
+	}, testPolicy())
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
@@ -176,11 +182,34 @@ func TestScanAcceptsDeclaredCommandRootWithoutCommandsPathSegment(testContext *t
 	write(testContext, filepath.Join(commandRoot, "deploy.md"), "---\ndescription: deploy command\n---\n")
 	items, operationError := Scan([]providerapi.SkillRoot{
 		declaredRoot(commandRoot, providerapi.SkillRootKindCommand, providerapi.SkillRootSourceCommand),
-	})
+	}, testPolicy())
 	if operationError != nil {
 		testContext.Fatal(operationError)
 	}
 	if len(items) != 1 || items[0].Name != "deploy" || items[0].Kind != string(providerapi.SkillRootKindCommand) {
 		testContext.Fatalf("declared command root was not scanned: %#v", items)
+	}
+}
+
+func TestScanHonorsPolicyLimits(testingContext *testing.T) {
+	root := testingContext.TempDir()
+	write(testingContext, filepath.Join(root, "first", "SKILL.md"), "---\nname: first\ndescription: 世界世界世界\n---\n")
+	write(testingContext, filepath.Join(root, "second", "SKILL.md"), "---\nname: second\n---\n")
+	policy := Policy{MaxFileBytes: 128, DescriptionMaxRunes: 4, MaxItems: 1}
+	items, operationError := Scan([]providerapi.SkillRoot{declaredRoot(root, providerapi.SkillRootKindSkill, providerapi.SkillRootSourceUser)}, policy)
+	if operationError != nil || len(items) != 1 || len([]rune(items[0].Description)) != 4 {
+		testingContext.Fatalf("items=%#v error=%v", items, operationError)
+	}
+	_, operationError = readRegularFile(filepath.Join(root, "first", "SKILL.md"), 8)
+	if !errors.Is(operationError, MetadataFileTooLargeError) {
+		testingContext.Fatalf("expected file limit error, got %v", operationError)
+	}
+}
+
+func TestPolicyRejectsFileLimitSentinelOverflow(testingContext *testing.T) {
+	policy := testPolicy()
+	policy.MaxFileBytes = math.MaxInt64
+	if policy.Validate() == nil {
+		testingContext.Fatal("accepted file limit sentinel overflow")
 	}
 }

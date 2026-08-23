@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +18,8 @@ import (
 	"time"
 
 	"github.com/rezoch340/any-aicli-remote/backend/internal/config"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/fsapi"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/gitapi"
 	"github.com/rezoch340/any-aicli-remote/backend/internal/hub"
 	"github.com/rezoch340/any-aicli-remote/backend/internal/loops"
 	processapi "github.com/rezoch340/any-aicli-remote/backend/internal/process"
@@ -26,6 +27,7 @@ import (
 	providerfactory "github.com/rezoch340/any-aicli-remote/backend/internal/provider/factory"
 	"github.com/rezoch340/any-aicli-remote/backend/internal/room"
 	"github.com/rezoch340/any-aicli-remote/backend/internal/sessionapi"
+	"github.com/rezoch340/any-aicli-remote/backend/internal/skills"
 	"github.com/rezoch340/any-aicli-remote/backend/internal/voice"
 )
 
@@ -44,9 +46,13 @@ type agentRestartAttempt struct {
 // Server owns the complete Go replacement for server.py. Its Handler can also
 // be mounted in tests without starting a listener.
 type Server struct {
-	configuration config.Config
-	logger        *slog.Logger
-	lanIP         string
+	configuration    config.Config
+	logger           *slog.Logger
+	lanIP            string
+	filesystemPolicy fsapi.Policy
+	gitPolicy        gitapi.Policy
+	voicePolicy      voice.Policy
+	skillsPolicy     skills.Policy
 
 	providers       *providerapi.Registry
 	providerCatalog providerapi.Provider
@@ -81,17 +87,41 @@ func New(raw config.Config, logger *slog.Logger) (*Server, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if errorValue := os.MkdirAll(configuration.DataDirectory, 0o755); errorValue != nil {
+	if errorValue := os.MkdirAll(configuration.DataDirectory, 0o700); errorValue != nil {
 		return nil, fmt.Errorf("create data directory: %w", errorValue)
 	}
 	if operationError := os.MkdirAll(configuration.RuntimeDirectory, 0o700); operationError != nil {
 		return nil, fmt.Errorf("create runtime directory: %w", operationError)
 	}
 
+	effectiveHistoryPolicy := historyPolicy(configuration.Canonical.Tuning.History)
+	effectiveFilesystemPolicy := filesystemPolicy(configuration.Canonical.Tuning.Filesystem)
+	effectiveGitPolicy := gitPolicy(configuration.Canonical.Tuning.Git)
+	effectiveRoomPolicy := roomPolicy(configuration.Canonical.Tuning.Room)
+	effectiveVoicePolicy := voicePolicy(configuration.Canonical.Tuning.Voice)
+	effectiveSkillsPolicy := skillsPolicy(configuration.Canonical.Tuning.Skills)
+	if errorValue := effectiveFilesystemPolicy.Validate(); errorValue != nil {
+		return nil, errorValue
+	}
+	if errorValue := effectiveSkillsPolicy.Validate(); errorValue != nil {
+		return nil, errorValue
+	}
+	if errorValue := effectiveVoicePolicy.Validate(); errorValue != nil {
+		return nil, errorValue
+	}
+	if errorValue := effectiveGitPolicy.Validate(); errorValue != nil {
+		return nil, errorValue
+	}
+	roomStore, errorValue := room.New(configuration.DataDirectory, effectiveRoomPolicy)
+	if errorValue != nil {
+		return nil, errorValue
+	}
 	providerComponents, errorValue := providerfactory.New(providerfactory.Configuration{
 		ProviderID:     configuration.ProviderID,
 		ExecutablePath: configuration.ProviderPath,
 		Options:        configuration.ProviderOptions,
+		HistoryPolicy:  effectiveHistoryPolicy,
+		VoicePolicy:    effectiveVoicePolicy,
 	})
 	if errorValue != nil {
 		return nil, errorValue
@@ -101,23 +131,31 @@ func New(raw config.Config, logger *slog.Logger) (*Server, error) {
 	providerRegistry := providerapi.NewRegistry(providerCatalog)
 
 	server := &Server{
-		configuration:   configuration,
-		logger:          logger,
-		lanIP:           discoverLANIP(),
-		providers:       providerRegistry,
-		providerCatalog: providerCatalog,
-		protocol:        protocol,
-		room:            room.New(configuration.DataDirectory),
-		voice:           providerComponents.Voice,
-		skillRoots:      providerComponents.SkillRoots,
-		stopChannel:     make(chan stopRequest, 1),
+		configuration:    configuration,
+		logger:           logger,
+		lanIP:            discoverLANIP(),
+		filesystemPolicy: effectiveFilesystemPolicy,
+		gitPolicy:        effectiveGitPolicy,
+		voicePolicy:      effectiveVoicePolicy,
+		skillsPolicy:     effectiveSkillsPolicy,
+		providers:        providerRegistry,
+		providerCatalog:  providerCatalog,
+		protocol:         protocol,
+		room:             roomStore,
+		voice:            providerComponents.Voice,
+		skillRoots:       providerComponents.SkillRoots,
+		stopChannel:      make(chan stopRequest, 1),
 	}
-	server.session = sessionapi.New(providerRegistry, configuration.ProviderID, configuration.DataDirectory)
+	server.session, errorValue = sessionapi.New(providerRegistry, configuration.ProviderID, configuration.DataDirectory, effectiveHistoryPolicy)
+	if errorValue != nil {
+		return nil, errorValue
+	}
 	server.process = &processapi.Manager{Config: processapi.Config{
 		Port: configuration.AgentPort, BindHost: configuration.AgentHost, Secret: configuration.AgentSecret,
 		RuntimeDirectory: configuration.RuntimeDirectory,
-		LogDirectory:     filepath.Join(configuration.DataDirectory, "logs"),
-		StatePath:        filepath.Join(configuration.DataDirectory, "agent-state.json"),
+		LogDirectory:     logsDirectory(configuration.DataDirectory),
+		StatePath:        agentStatePath(configuration.DataDirectory),
+		LifecyclePolicy:  processLifecyclePolicy(configuration.Canonical.Tuning.Lifecycle),
 	}}
 
 	var ensure hub.EnsureAgentFunc
@@ -125,50 +163,29 @@ func New(raw config.Config, logger *slog.Logger) (*Server, error) {
 		ensure = server.ensureAgentProcess
 	}
 	agentURL := protocol.AgentWebSocketURL(configuration.AgentHost, configuration.AgentPort, configuration.AgentSecret).String()
-	server.hub = hub.New(agentURL, providerCatalog, protocol, ensure, logger)
-	server.loops, errorValue = loops.New(filepath.Join(configuration.DataDirectory, "loops.json"), server.fireLoop)
+	server.hub, errorValue = hub.New(agentURL, providerCatalog, protocol, ensure, hubPolicy(configuration.Canonical.Tuning), logger)
+	if errorValue != nil {
+		return nil, errorValue
+	}
+	server.loops, errorValue = loops.New(loopsStorePath(configuration.DataDirectory), server.fireLoop, loopsPolicy(configuration.Canonical.Tuning.Loops))
 	if errorValue != nil {
 		return nil, fmt.Errorf("open remote loops: %w", errorValue)
 	}
-	_ = server.writeRuntimeConfig()
+	if errorValue := server.writeRuntimeConfig(); errorValue != nil {
+		server.Close()
+		return nil, fmt.Errorf("write runtime config: %w", errorValue)
+	}
 	return server, nil
 }
 
 func normalizeConfig(configuration config.Config) (config.Config, error) {
-	if strings.TrimSpace(configuration.Bind) == "" {
-		configuration.Bind = "0.0.0.0"
+	if configuration.Canonical.Version == 0 {
+		return configuration, errors.New("canonical config is required")
 	}
-	if configuration.Port == 0 {
-		configuration.Port = config.DefaultPort
+	if operationError := config.ValidateDocument(configuration.Canonical); operationError != nil {
+		return configuration, fmt.Errorf("validate canonical config: %w", operationError)
 	}
-	if strings.TrimSpace(configuration.AgentHost) == "" {
-		configuration.AgentHost = "127.0.0.1"
-	}
-	if configuration.AgentPort == 0 {
-		configuration.AgentPort = config.DefaultAgentPort
-	}
-	if configuration.Port < 1 || configuration.Port > 65535 || configuration.AgentPort < 1 || configuration.AgentPort > 65535 {
-		return configuration, errors.New("ports must be between 1 and 65535")
-	}
-	if configuration.Port == configuration.AgentPort {
-		return configuration, errors.New("HTTP and agent ports must differ")
-	}
-	home, _ := os.UserHomeDir()
-	if strings.TrimSpace(configuration.DataDirectory) == "" {
-		configuration.DataDirectory = filepath.Join(home, ".any-aicli-remote")
-	}
-	if strings.TrimSpace(configuration.RuntimeDirectory) == "" {
-		configuration.RuntimeDirectory = filepath.Join(configuration.DataDirectory, "run")
-	}
-	absoluteRuntimeDirectory, errorValue := filepath.Abs(configuration.RuntimeDirectory)
-	if errorValue != nil {
-		return configuration, errorValue
-	}
-	configuration.RuntimeDirectory = absoluteRuntimeDirectory
-	if strings.TrimSpace(configuration.ProviderID) == "" {
-		configuration.ProviderID = providerfactory.DefaultProviderID
-	}
-	return configuration, nil
+	return config.ApplyCanonical(configuration, configuration.Canonical), nil
 }
 
 func (server *Server) fireLoop(executionContext context.Context, job loops.Job, note string) error {
@@ -189,7 +206,7 @@ func (server *Server) fireLoop(executionContext context.Context, job loops.Job, 
 
 // Handler returns all compatibility routes behind the pairing-key middleware.
 func (server *Server) Handler() http.Handler {
-	return authMiddleware(server.configuration.PairingSecret, server.routes())
+	return authMiddleware(server.configuration.PairingSecret, cookieMaxAgeSeconds(server.configuration.Canonical.Tuning.HTTP), server.routes())
 }
 
 // Run starts the hub, loop scheduler, and HTTP listener and blocks until the
@@ -200,18 +217,13 @@ func (server *Server) Run(executionContext context.Context) error {
 	}
 	listener, errorValue := net.Listen("tcp", net.JoinHostPort(server.configuration.Bind, fmt.Sprint(server.configuration.Port)))
 	if errorValue != nil {
-		if healthyRemote(server.configuration.Port) {
+		if healthyRemote(server.configuration.Port, server.configuration.Canonical.Tuning.HTTP.ExistingDaemonProbeTimeout.Duration, server.configuration.Canonical.Tuning.HTTP.HealthProbeMaxBytes) {
 			return AlreadyRunningError
 		}
 		return errorValue
 	}
 
-	httpServer := &http.Server{
-		Handler:           server.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       75 * time.Second,
-		MaxHeaderBytes:    1 << 20,
-	}
+	httpServer := newHTTPServer(server.Handler(), server.configuration.Canonical.Tuning.HTTP)
 	server.httpMutex.Lock()
 	server.http = httpServer
 	server.httpMutex.Unlock()
@@ -225,7 +237,7 @@ func (server *Server) Run(executionContext context.Context) error {
 	}
 	server.hub.Start(executionContext)
 	if errorValue := server.loops.Start(executionContext); errorValue != nil {
-		shutdownContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownContext, cancel := context.WithTimeout(context.Background(), server.configuration.Canonical.Tuning.HTTP.StartupFailureShutdownTimeout.Duration)
 		_ = httpServer.Shutdown(shutdownContext)
 		cancel()
 		return errorValue
@@ -245,7 +257,7 @@ func (server *Server) Run(executionContext context.Context) error {
 		}
 	}
 
-	shutdownContext, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	shutdownContext, cancel := context.WithTimeout(context.Background(), server.configuration.Canonical.Tuning.HTTP.ShutdownTimeout.Duration)
 	_ = httpServer.Shutdown(shutdownContext)
 	cancel()
 	server.Close()
@@ -273,12 +285,12 @@ func (server *Server) ensureAgentAtBoot(parent context.Context) {
 	if !isLoopbackHost(server.configuration.AgentHost) {
 		return
 	}
-	bootContext, bootCancel := context.WithTimeout(parent, 18*time.Second)
+	bootContext, bootCancel := context.WithTimeout(parent, server.configuration.Canonical.Tuning.Lifecycle.BootAgentTimeout.Duration)
 	if errorValue := server.ensureAgentProcess(bootContext); errorValue != nil {
 		server.logger.Warn("agent start failed", "error", errorValue)
 	}
 	bootCancel()
-	executionContext, cancel := context.WithTimeout(parent, 18*time.Second)
+	executionContext, cancel := context.WithTimeout(parent, server.configuration.Canonical.Tuning.Lifecycle.HubEnsureTimeout.Duration)
 	defer cancel()
 	if errorValue := server.hub.Ensure(executionContext); errorValue != nil {
 		server.logger.Warn("upstream agent unavailable", "error", errorValue)
@@ -391,10 +403,10 @@ func (server *Server) configureProcessCommandLocked() error {
 
 func (server *Server) waitForAgent(executionContext context.Context) bool {
 	address := net.JoinHostPort(server.configuration.AgentHost, strconv.Itoa(server.configuration.AgentPort))
-	ticker := time.NewTicker(250 * time.Millisecond)
+	ticker := time.NewTicker(server.configuration.Canonical.Tuning.Lifecycle.ListenerPoll.Duration)
 	defer ticker.Stop()
 	for {
-		attempt, cancel := context.WithTimeout(executionContext, 500*time.Millisecond)
+		attempt, cancel := context.WithTimeout(executionContext, server.configuration.Canonical.Tuning.Lifecycle.DialTimeout.Duration)
 		connection, errorValue := (&net.Dialer{}).DialContext(attempt, "tcp", address)
 		cancel()
 		if errorValue == nil {
@@ -430,8 +442,8 @@ func (server *Server) requestStop(keepAgent bool) {
 	}
 }
 
-func healthyRemote(port int) bool {
-	client := &http.Client{Timeout: 2 * time.Second}
+func healthyRemote(port int, timeout time.Duration, maxBytes int64) bool {
+	client := &http.Client{Timeout: timeout}
 	response, errorValue := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", port))
 	if errorValue != nil {
 		return false
@@ -440,7 +452,7 @@ func healthyRemote(port int) bool {
 	if response.StatusCode != http.StatusOK {
 		return false
 	}
-	data, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+	data, _ := io.ReadAll(io.LimitReader(response.Body, maxBytes))
 	return bytes.Contains(data, []byte(`"ok"`))
 }
 
