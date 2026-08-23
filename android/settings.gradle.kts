@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GrokRemote"
+rootProject.name = "AnyAICLIRemote"
 include(":app")

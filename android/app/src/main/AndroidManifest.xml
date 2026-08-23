@@ -4,13 +4,17 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:allowBackup="true"
-        android:label="Grok Remote"
-        android:theme="@style/Theme.GrokRemote"
+        android:allowBackup="false"
+        android:label="${productDisplayName}"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.AnyAICLIRemote"
         android:usesCleartextTraffic="true">
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -20,7 +24,8 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="grokremote" android:host="pair" />
+                <data android:scheme="${productPairingScheme}" android:host="pair" />
+                <data android:scheme="${legacyPairingScheme}" android:host="pair" />
             </intent-filter>
         </activity>
     </application>
