@@ -200,13 +200,26 @@ struct ChatMessageCollectionView: UIViewRepresentable {
             pendingLayout = false
             guard let collection else { return }
             let layoutStartOffset = collection.contentOffset
+            // 布局由 CADisplayLink 驱动，可能早于首次快照落地。那一刻集合视图还没有第 0 个
+            // section，询问其条目数会抛 NSInternalInconsistencyException；而直接跳过又会把
+            // 初次滚动到底静默吞掉，重开会话时停在半空。这里推迟到快照落地后再滚。
+            var initialRevealDeferred = false
             UIView.performWithoutAnimation {
                 collection.layoutIfNeeded()
-                if self.initialRevealPending, collection.numberOfItems(inSection: 0) > 0 {
-                    let lastIndex = IndexPath(item: collection.numberOfItems(inSection: 0) - 1, section: 0)
-                    collection.scrollToItem(at: lastIndex, at: .bottom, animated: false)
-                    collection.layoutIfNeeded()
+                guard self.initialRevealPending else { return }
+                guard collection.numberOfSections > 0 else {
+                    initialRevealDeferred = true
+                    return
                 }
+                let itemCount = collection.numberOfItems(inSection: 0)
+                guard itemCount > 0 else { return }
+                let lastIndex = IndexPath(item: itemCount - 1, section: 0)
+                collection.scrollToItem(at: lastIndex, at: .bottom, animated: false)
+                collection.layoutIfNeeded()
+            }
+            if initialRevealDeferred {
+                requestLayout()
+                return
             }
             updateFollowingScrollPosition(startingOffset: layoutStartOffset)
             if completeInitialRevealIfReady(collection: collection) {
