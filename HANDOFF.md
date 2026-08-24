@@ -5,54 +5,12 @@
 Phase 0 全栈模块化**已完成并推送**。TODO 5 功能门禁**已解除**，可以开始
 Phase 1 backend interaction contract。
 
-本轮共 15 个 commit（`8e73804..22afbd2`），全部已推送到 `origin/main`。
-工作区除本文件外干净。
+全部 commit 已推送到 `origin/main`，工作区除本文件外干净。真机联调发现的
+四个缺陷均已修复并验证。
 
-## 2. 唯一未解决的问题（接手者请先看这里）
+## 2. 未解决问题
 
-**iOS 重开会话后不滚到底。**
-
-`scripts/ios-live-daemon-e2e.sh` 的
-`testStreamingResponseAutoScrollAgainstLiveDaemon` 仍然失败：
-
-```
-DevicePairingUITests.swift:151  XCTAssertTrue failed          （末尾 marker 找不到）
-DevicePairingUITests.swift:315  XCTAssertLessThanOrEqual failed:
-                                ("250.715576171875") is greater than ("80.0")
-```
-
-断言在 `assertAssistantAtComposer`：最后一条助手消息底部与 composer 顶部的
-间距必须 ≤ 80pt，实测 250.7pt。marker 找不到是同一原因的表现——没滚到底，
-长回复末尾的 `AUTOSCROLLENDMARKER` 在屏幕外，XCUI 取不到。
-
-### 已知事实（不要重复验证）
-
-- 该数值在 4 次运行中**完全一致到小数点后六位**，是确定性行为，不是抖动。
-- 失败发生在测试后半段：`terminate` → 重启 app → 重新进入会话（走历史加载
-  路径），不是首次流式那一段。
-- 崩溃已在 `22afbd2` 修掉，修复前该测试是 SIGABRT 而非断言失败，崩溃把这个
-  滚动问题**掩盖**了。两者互相独立。
-- 相关代码：`ios/AnyAICLIRemoteFeature/Views/ChatMessageCollectionView.swift`
-  的 `flushLayout` / `completeInitialRevealIfReady` / `initialRevealPending`。
-
-### 我没做完的一步
-
-我曾试图用「临时回退后端过滤再跑一次」来判断这个失败是否由本轮后端改动引起。
-**那次实验是无效的**：对一个已提交、无改动的文件执行 `git stash push <path>`
-等于什么都没做，后端过滤全程都在生效。因此
-
-> **「这个滚动失败与后端 history 过滤无关」这个结论没有证据支撑，不要采信。**
-
-接手者应重新做这个隔离：用 `git revert --no-commit 2951609` 或
-`git checkout 2951609~1 -- backend/internal/provider/grok/sessionhistory.go`
-真正回退过滤，重建守护进程后再跑一次 live E2E，才能判断因果。
-
-### 建议的下一步
-
-先取证再改代码：测试自带
-`attachScreenshot(named: "session-reopened-at-bottom")`，从
-`~/Library/Developer/Xcode/DerivedData/AnyAICLIRemote-*/Logs/Test/*.xcresult`
-里把这张图导出来看实际停在哪，比继续推理快得多。
+无。上一版交接里记录的 iOS 重开会话滚动问题已定位并修复，见第 3 节。
 
 ## 3. 本轮完成的工作
 
@@ -93,6 +51,34 @@ iOS 用 `SwiftStreamingMarkdown` 自带高亮，Android 只装了 mikepenz 渲�
 `SyntaxThemes.default(darkMode = true)`：库默认跟随 `isSystemInDarkTheme()`，
 而聊天区恒为深色，浅色系统下会选出深色标点，括号与箭头直接不可见。
 
+### 真机联调发现并修掉的另外两个缺陷
+
+**`8070377` iOS：cell 复用残留上一条消息**
+
+`cellRegistration` 在 `models` 取不到模型时直接 return，没重设
+`contentConfiguration`，复用的 cell 于是留着上一条消息的内容。改为就地按
+当前 block 补建模型，取不到才清空配置。
+
+**`956d535` 两端：重开会话叠加 provider 历史重放**
+
+打开会话先用 `/messages` 落地权威历史，随后的 `session/load` 会让 provider
+把整轮对话作为 `session/update` 重放。两端都把重放直接追加到已有历史上，
+于是用户消息、思考与回复各出现两次；进程重启后回显去重表为空，拦不住重放。
+
+两端对称加挂载标记，挂载 RPC 期间丢弃重放的 `session/update`。这是定位过程
+里唯一靠日志坐实的结论——中途我基于像素做过几次推断都是错的，最后是在
+`SessionCoordinator` 与 `TurnCoordinator` 各插一行 `NSLog` 才看清楚：
+
+```
+DBGHIST loaded blocks=2 kinds=user,assistant
+DBGEVT user_message_chunk  blocksBefore=2
+DBGEVT agent_thought_chunk blocksBefore=3
+DBGEVT agent_message_chunk blocksBefore=4
+```
+
+接手者若再遇到「界面对不上数据」，建议直接走这条路：先确认后端返回，再打
+日志看客户端拿到什么，不要从截图反推。
+
 ## 4. 验收命令与本轮结果
 
 | 栈 | 命令 | 本轮结果 |
@@ -102,7 +88,7 @@ iOS 用 `SwiftStreamingMarkdown` 自带高亮，Android 只装了 mikepenz 渲�
 | Android | `./scripts/android-connected-e2e.sh` | 16 用例 0 失败 |
 | iOS | `xcodegen` + `check-native-source-quality.sh` | 0 违规 / 46 文件 |
 | iOS | `xcodebuild test`（模拟器） | 37 用例 0 失败 |
-| iOS | `scripts/ios-live-daemon-e2e.sh` | **1 通过 1 失败**（见第 2 节） |
+| iOS | `scripts/ios-live-daemon-e2e.sh` | 2 用例全通过 |
 
 `xcodebuild test` 里那 2 个 live 用例是 **SKIPPED**，不能当作 live 链路的验证。
 判断 iOS 真实链路必须单独跑 `ios-live-daemon-e2e.sh`。
