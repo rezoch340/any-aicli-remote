@@ -77,7 +77,13 @@ struct ChatMessageCollectionView: UIViewRepresentable {
         private var sessionLoadClampDeadline: CFTimeInterval?
         private var contentObservation: NSKeyValueObservation?
         private lazy var cellRegistration = UICollectionView.CellRegistration<UICollectionViewCell, String> { [weak self] cell, _, identifier in
-            guard let self, let model = self.models[identifier] else { return }
+            guard let self else { return }
+            // 取不到模型时绝不能直接返回：出列的是复用的 cell，不重设 contentConfiguration
+            // 就会原样留着上一个 block 的内容，看起来像是消息被渲染了两遍而真正的回复消失。
+            guard let model = self.model(for: identifier) else {
+                cell.contentConfiguration = nil
+                return
+            }
             let cellGeneration = self.sessionGeneration
             let cellIdentity = self.identity
             cell.contentConfiguration = UIHostingConfiguration {
@@ -103,6 +109,20 @@ struct ChatMessageCollectionView: UIViewRepresentable {
                 guard let self, change.newValue != change.oldValue else { return }
                 DispatchQueue.main.async { [weak self] in self?.contentSizeChanged() }
             }
+        }
+
+        /// 出列时优先用已建模型；若快照与模型表短暂不同步，就地按当前 block 补建，
+        /// 保证每个 cell 只呈现自己的 block。
+        private func model(for identifier: String) -> CellModel? {
+            if let existing = models[identifier] { return existing }
+            guard let block = owner.blocks.first(where: { $0.id == identifier }) else { return nil }
+            let created = CellModel(
+                block: block,
+                isStreaming: block.id == owner.streamingAssistantID,
+                permission: owner.onPermissionAnswer
+            )
+            models[identifier] = created
+            return created
         }
 
         private func contentSizeChanged() {
