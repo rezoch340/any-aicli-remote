@@ -54,6 +54,8 @@ internal class SessionCoordinator(
                 destination = AppDestination.CHAT,
                 selectedSession = session,
                 blocks = emptyList(),
+                childAgents = emptyList(),
+                pendingInteraction = null,
                 busy = false,
                 status = "同步历史",
                 error = null,
@@ -74,7 +76,7 @@ internal class SessionCoordinator(
         ) {
             val history = sessionController.loadHistory(session)
             if (scope.isSessionCurrent(operationToken, deviceId, session.identity)) {
-                scope.update { it.copy(selectedSession = history.session, blocks = history.blocks, busy = false) }
+                scope.update { it.copy(selectedSession = history.session, blocks = history.blocks, childAgents = history.childAgents, busy = false) }
             }
         }
     }
@@ -109,6 +111,8 @@ internal class SessionCoordinator(
                 destination = AppDestination.SESSIONS,
                 selectedSession = null,
                 blocks = emptyList(),
+                childAgents = emptyList(),
+                pendingInteraction = null,
                 busy = false,
                 selectedFiles = emptyList(),
                 filePickerVisible = false,

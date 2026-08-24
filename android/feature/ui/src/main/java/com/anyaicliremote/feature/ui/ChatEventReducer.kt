@@ -2,6 +2,7 @@ package com.anyaicliremote.feature.ui
 
 import com.anyaicliremote.core.remote.ACPEvent
 import com.anyaicliremote.core.chat.ChatTranscriptReducer
+import com.anyaicliremote.core.chat.ChildAgentReducer
 import com.anyaicliremote.core.chat.PendingUserEchoTracker
 import com.anyaicliremote.core.model.ChatBlock
 import com.anyaicliremote.core.model.ChatBlockKind
@@ -80,7 +81,25 @@ internal class ChatEventReducer {
                 }
             }
             is ACPEvent.PermissionRequest -> reducePermissionRequest(state, event)
+            is ACPEvent.ChildAgentUpdate -> reduceChildAgent(state, event)
+            is ACPEvent.Interaction -> reduceInteraction(state, event)
         }
+    }
+
+    private fun reduceChildAgent(
+        state: ChatUiState,
+        event: ACPEvent.ChildAgentUpdate,
+    ): ChatEventReduction {
+        if (!acceptsSessionEvent(state, event.identity)) return ChatEventReduction(state)
+        return ChatEventReduction(state.copy(childAgents = ChildAgentReducer.apply(state.childAgents, event.card)))
+    }
+
+    private fun reduceInteraction(
+        state: ChatUiState,
+        event: ACPEvent.Interaction,
+    ): ChatEventReduction {
+        if (!acceptsSessionEvent(state, event.request.sessionIdentity)) return ChatEventReduction(state)
+        return ChatEventReduction(state.copy(pendingInteraction = event.request))
     }
 
     fun finishTurn(

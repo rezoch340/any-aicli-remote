@@ -7,6 +7,9 @@ import com.anyaicliremote.core.model.SessionMessage
 import com.anyaicliremote.core.model.SessionSummary
 import com.anyaicliremote.core.model.ToolRunState
 import com.anyaicliremote.core.model.WorkspaceFile
+import com.anyaicliremote.core.model.ChildAgentCard
+import com.anyaicliremote.core.model.childAgentStatus
+import com.anyaicliremote.core.model.long
 import com.anyaicliremote.core.model.obj
 import com.anyaicliremote.core.model.objects
 import com.anyaicliremote.core.model.string
@@ -42,6 +45,25 @@ object SessionPayloadMapper {
 
     fun workspaceFiles(response: JsonObject): List<WorkspaceFile> =
         response.objects("files").mapNotNull { item -> WorkspaceFile.from(item, false) }
+
+    /** Reads the history child-agent snapshot returned alongside messages. */
+    fun childAgents(response: JsonObject): List<ChildAgentCard> =
+        response.objects("childAgents").mapNotNull { record ->
+            val providerChildId = record.string("providerChildId") ?: return@mapNotNull null
+            ChildAgentCard(
+                providerChildId = providerChildId,
+                childSessionId = record.string("childSessionId") ?: "",
+                agentType = record.string("agentType") ?: "",
+                description = record.string("description") ?: "",
+                status = childAgentStatus(record.string("status")),
+                startedAt = record.long("startedAt"),
+                completedAt = record.long("completedAt"),
+                toolCallCount = record.long("toolCallCount").toInt(),
+                turnCount = record.long("turnCount").toInt(),
+                modelId = record.string("modelId") ?: "",
+                tokensUsed = record.long("tokensUsed"),
+            )
+        }
 
     fun modelState(response: JsonObject, fallback: ModelState): ModelState {
         val source = response.obj("models")

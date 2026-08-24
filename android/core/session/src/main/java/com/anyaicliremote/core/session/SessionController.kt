@@ -4,6 +4,7 @@ import com.anyaicliremote.core.remote.ACPWire
 import com.anyaicliremote.core.remote.AnyAICLIRemoteClient
 import com.anyaicliremote.core.remote.ClientRuntimeConfiguration
 import com.anyaicliremote.core.model.ChatBlock
+import com.anyaicliremote.core.model.InteractionAnswer
 import com.anyaicliremote.core.model.ModelState
 import com.anyaicliremote.core.model.SessionMessage
 import com.anyaicliremote.core.model.SessionSummary
@@ -49,7 +50,7 @@ class SessionController(
             resolved,
             response.objects("messages").mapNotNull(SessionMessage::from),
         )
-        return SessionHistory(resolved, blocks)
+        return SessionHistory(resolved, blocks, SessionPayloadMapper.childAgents(response))
     }
 
     suspend fun mount(session: SessionSummary, model: ModelState): ModelState {
@@ -110,9 +111,17 @@ class SessionController(
             })
         })
     }
+
+    fun answerInteraction(requestId: Long, answer: InteractionAnswer) {
+        client.reply(requestId, InteractionAnswerCodec.toResult(answer))
+    }
 }
 
-data class SessionHistory(val session: SessionSummary, val blocks: List<ChatBlock>)
+data class SessionHistory(
+    val session: SessionSummary,
+    val blocks: List<ChatBlock>,
+    val childAgents: List<com.anyaicliremote.core.model.ChildAgentCard> = emptyList(),
+)
 data class CreatedSessionResponse(
     val identifier: String,
     val responseSession: SessionSummary?,

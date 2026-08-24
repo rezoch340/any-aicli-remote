@@ -56,7 +56,7 @@ class ACPWireTest {
         )
         assertEquals(
             ACPWire.IncomingRequestDisposition.UI_HANDLED,
-            ACPWire.classifyIncomingRequest("session/ask_user"),
+            ACPWire.classifyIncomingRequest("session/interaction_request"),
         )
         assertEquals(
             ACPWire.IncomingRequestDisposition.METHOD_NOT_FOUND,

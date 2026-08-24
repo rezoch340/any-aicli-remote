@@ -8,6 +8,8 @@ import com.anyaicliremote.core.remote.ClientRuntimeConfiguration
 import com.anyaicliremote.core.session.SessionController
 import com.anyaicliremote.core.storage.DeviceProfileController
 import com.anyaicliremote.core.model.ChatBlock
+import com.anyaicliremote.core.model.PendingInteraction
+import com.anyaicliremote.core.model.InteractionAnswer
 import com.anyaicliremote.core.model.ConnectionStatus
 import com.anyaicliremote.core.model.SavedDevice
 import com.anyaicliremote.core.model.SessionSummary
@@ -54,6 +56,7 @@ class ChatViewModel(
     private val turnCoordinator = TurnCoordinator(
         operations, sessionController, chatEventReducer, sessionCoordinator, viewModelScope,
     )
+    private val interactionController = InteractionController(operations, sessionController)
 
     init {
         viewModelScope.launch {
@@ -132,6 +135,12 @@ class ChatViewModel(
 
     fun answerPermission(block: ChatBlock, optionId: String?) =
         turnCoordinator.answerPermission(block, optionId)
+
+    fun answerInteraction(interaction: PendingInteraction, answer: InteractionAnswer) =
+        interactionController.answer(interaction, answer)
+
+    fun dismissInteraction(interaction: PendingInteraction) =
+        interactionController.dismiss(interaction)
 
     override fun onCleared() {
         connectionCoordinator.releaseOnCleared()

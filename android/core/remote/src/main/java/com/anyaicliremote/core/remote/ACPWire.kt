@@ -47,10 +47,13 @@ object ACPWire {
     val cancelMethod: String = AcpMethod.AgentMethods.SessionCancel.toString()
     const val sessionUpdateMethod: String = "session/update"
     const val sessionsChangedMethod: String = "sessions/changed"
+    const val childAgentUpdateMethod: String = "session/child_agent_update"
+    const val interactionRequestMethod: String = "session/interaction_request"
 
     fun isPermissionMethod(method: String): Boolean {
-        val normalizedMethod = method.lowercase()
-        return normalizedMethod.contains("permission") || normalizedMethod.contains("ask_user")
+        // The daemon translates ask/exit into session/interaction_request, so the
+        // client only ever sees genuine permission methods here.
+        return method.lowercase().contains("permission")
     }
 
     fun initializeParameters(clientName: String, clientVersion: String): JsonObject =
@@ -141,7 +144,7 @@ object ACPWire {
         )
 
     fun classifyIncomingRequest(method: String): IncomingRequestDisposition =
-        if (isPermissionMethod(method)) {
+        if (isPermissionMethod(method) || method == interactionRequestMethod) {
             IncomingRequestDisposition.UI_HANDLED
         } else {
             IncomingRequestDisposition.METHOD_NOT_FOUND

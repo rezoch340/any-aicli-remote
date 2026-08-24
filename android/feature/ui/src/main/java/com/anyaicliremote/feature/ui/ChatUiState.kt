@@ -1,9 +1,11 @@
 package com.anyaicliremote.feature.ui
 
 import com.anyaicliremote.core.model.ChatBlock
+import com.anyaicliremote.core.model.ChildAgentCard
 import com.anyaicliremote.core.model.ConnectionStatus
 import com.anyaicliremote.core.model.DeviceHealthStatus
 import com.anyaicliremote.core.model.ModelState
+import com.anyaicliremote.core.model.PendingInteraction
 import com.anyaicliremote.core.model.SavedDevice
 import com.anyaicliremote.core.model.SessionSummary
 import com.anyaicliremote.core.model.WorkspaceFile
@@ -33,6 +35,8 @@ data class ChatUiState(
     val filePickerFiles: List<WorkspaceFile> = emptyList(),
     val filePickerLoading: Boolean = false,
     val filePickerError: String? = null,
+    val childAgents: List<ChildAgentCard> = emptyList(),
+    val pendingInteraction: PendingInteraction? = null,
 )
 
 enum class AppDestination { DEVICES, PAIRING, SESSIONS, CHAT }
