@@ -3,6 +3,7 @@ package hub
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -20,6 +21,10 @@ type reverseRequestRoute struct {
 	agentGeneration uint64
 	clients         map[*clientConnection]struct{}
 	permission      bool
+	// interactionKind is set when the route is a structured interaction, so the
+	// client's neutral answer can be denormalized back to the provider shape
+	// before it is relayed to the agent.
+	interactionKind providerapi.InteractionKind
 }
 
 func (hubInstance *Hub) handleReverseAsync(
@@ -40,7 +45,19 @@ func (hubInstance *Hub) handleReverseAsync(
 		return false
 	}
 	if reverseRequest.Operation == providerapi.PermissionOperation {
-		hubInstance.forwardReverseRequest(object, reverseRequest.SessionID, true, agentGeneration)
+		hubInstance.forwardReverseRequest(object, reverseRequest.SessionID, true, "", agentGeneration)
+		return true
+	}
+	if reverseRequest.Operation == providerapi.InteractionOperation {
+		method, _ := object["method"].(string)
+		interaction, handled := hubInstance.protocol.NormalizeInteractionRequest(method, params)
+		if !handled {
+			hubInstance.replyInteractionUnavailable(object["id"], "malformed interaction request", agentGeneration)
+			return true
+		}
+		object["method"] = providerapi.SessionInteractionRequestMethod
+		object["params"] = interactionRequestParams(interaction)
+		hubInstance.forwardReverseRequest(object, interaction.SessionID, true, interaction.Kind, agentGeneration)
 		return true
 	}
 	hubInstance.stateMutex.Lock()
@@ -130,7 +147,7 @@ func (hubInstance *Hub) handleReverse(
 	}
 }
 
-func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID string, permission bool, agentGeneration uint64) {
+func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID string, permission bool, interactionKind providerapi.InteractionKind, agentGeneration uint64) {
 	identifier, present := object["id"]
 	if !present {
 		return
@@ -167,14 +184,18 @@ func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID s
 	}
 	if len(targetClients) == 0 {
 		hubInstance.stateMutex.Unlock()
-		hubInstance.replyReverseUnavailable(identifier, permission, "no matching remote client", agentGeneration)
+		if interactionKind != "" {
+			hubInstance.replyInteractionUnavailable(identifier, "no matching remote client", agentGeneration)
+		} else {
+			hubInstance.replyReverseUnavailable(identifier, permission, "no matching remote client", agentGeneration)
+		}
 		return
 	}
 	clientIdentifier := atomic.AddInt64(&hubInstance.nextID, 1)
 	object["id"] = clientIdentifier
 	routeKey := idKey(clientIdentifier)
 	hubInstance.reverseRequests[routeKey] = reverseRequestRoute{
-		identifier: identifier, agentGeneration: agentGeneration, clients: targetClients, permission: permission,
+		identifier: identifier, agentGeneration: agentGeneration, clients: targetClients, permission: permission, interactionKind: interactionKind,
 	}
 	hubInstance.stateMutex.Unlock()
 
@@ -315,4 +336,33 @@ func writeTextFilePinned(params map[string]any, rootIdentity *fsapi.RootIdentity
 		return nil, operationError
 	}
 	return map[string]any{}, nil
+}
+
+// interactionRequestParams renders the neutral interaction request as the params
+// object clients receive under session/interaction_request. Marshaling through
+// the typed struct keeps clients from ever seeing the provider wire.
+func interactionRequestParams(interaction providerapi.InteractionRequest) map[string]any {
+	encoded, marshalError := json.Marshal(interaction)
+	if marshalError != nil {
+		return map[string]any{}
+	}
+	params := map[string]any{}
+	if json.Unmarshal(encoded, &params) != nil {
+		return map[string]any{}
+	}
+	return params
+}
+
+// replyInteractionUnavailable fails an interaction closed toward the agent with
+// a JSON-RPC error. This matches the agent's own handling: a failed interaction
+// leaves plan mode active and reappears on reconnect, and never delivers a
+// malformed or permission-shaped result the agent would misparse.
+func (hubInstance *Hub) replyInteractionUnavailable(identifier any, message string, agentGeneration uint64) {
+	if identifier == nil {
+		return
+	}
+	hubInstance.replyAgentForGeneration(agentGeneration, map[string]any{
+		"jsonrpc": "2.0", "id": identifier,
+		"error": map[string]any{"code": providerReverseOperationErrorCode, "message": message},
+	})
 }

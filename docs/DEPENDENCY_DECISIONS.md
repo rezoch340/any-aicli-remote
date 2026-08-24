@@ -375,3 +375,11 @@ is macOS and Linux; renameio's documented platform support does not include Wind
 - Decision: 加入同版本的 `-code-android` 模块，通过 `markdownComponents(codeFence = …, codeBlock = …)` 接入 `MarkdownHighlightedCodeFence`/`MarkdownHighlightedCodeBlock`，不升级既有 markdown 渲染器版本，不引入第二套 markdown 解析。
 - Boundary: 库默认的 `rememberHighlightsBuilder()` 跟随 `isSystemInDarkTheme()`；聊天区恒为深色，浅色系统下会选出深色标点，导致括号与箭头在深色底上不可见。因此固定使用 `SyntaxThemes.default(darkMode = true)`，该固定值属于呈现不变量，不是可调部署配置。
 - Boundary: 高亮只作用于助手 Markdown 的代码围栏；行内代码、表格、引用块仍由既有 `markdownTypography`/`markdownColor` 负责，不得复制第二套配色来源。
+
+## 结构化交互（ask / exit plan）
+
+- Checked: 仓库已用的 [`coder/acp-go-sdk`](https://github.com/coder/acp-go-sdk) `v0.13.5`，其 `Plan`/`PlanEntry`/`UpdatePlan` 覆盖“展示计划”的 sessionUpdate（已是 ACP 形状，直接透传，无需自写）。其 elicitation 类型带 `Unstable` 前缀，且本机 grok agent 的 `initialize` 不通告 elicitation 能力（实测），故 ask/exit 不走 ACP elicitation。
+- Checked: 权威 wire 来源为开源 [`xai-org/grok-build`](https://github.com/xai-org/grok-build)（Rust）。应答类型定义 `ExitPlanModeExtResponse{outcome, feedback?}`（approved|cancelled|abandoned）与 `AskUserQuestionExtResponse`（内部标签 outcome：accepted{answers: map}、chat_about_this、skip_interview{partial_answers}）。ask 的 `answers` 必须是 map（键=问题索引串），发数组会被 agent 拒（"invalid type: sequence, expected a map"）。本仓库通过真实守护进程双向抓包 + 源码交叉确认。
+- Decision: 复用 acp-go-sdk 的 JSON-RPC envelope 与 Plan 展示类型；ask/exit 的 `_x.ai/*` 私有请求/应答为 grok 私有形状，ACP 无对应物，故在 Grok adapter 内手写最小双向映射（入：`NormalizeInteractionRequest`；出：`DenormalizeInteractionResponse`）。中立 typed interaction 放 `internal/provider/interaction.go`，私有解析只放 `internal/provider/grok/interaction.go`。不新增依赖。
+- Boundary: 客户端只消费中立 `session/interaction_request`，绝不解析 `_x.ai/*` wrapper。Hub 复用 permission 的 session 定向 + first-answer-wins + 断连取消路径；交互失败一律回 JSON-RPC error（与 agent “重连后重现”行为一致），不回 permission 形状的 cancelled 结果。未知/畸形请求或应答 fail closed。
+- Boundary: 同一份数据在 grok wire 里有三种拼写（tool_call 用 `multi_select`，tool_call_update 与反向请求用 `multiSelect`）；适配器只认反向请求侧的 `multiSelect`，展示帧的 tool_call 由既有 session/update 透传，不复制第二份解析。

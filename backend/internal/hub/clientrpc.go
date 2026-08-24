@@ -132,6 +132,10 @@ func (hubInstance *Hub) handleClientMessage(client *clientConnection, raw []byte
 		if !known || !allowed {
 			return
 		}
+		if route.interactionKind != "" {
+			hubInstance.relayInteractionAnswer(object, route, client, identifier)
+			return
+		}
 		object["id"] = route.identifier
 		if operationError := hubInstance.sendAgentJSONForGeneration(route.agentGeneration, object); operationError != nil {
 			hubInstance.logger.Warn("reverse RPC response dropped", "error", operationError)
@@ -173,4 +177,49 @@ func (hubInstance *Hub) sendRPCError(client *clientConnection, identifier any, m
 		return
 	}
 	_ = client.send(mustJSON(map[string]any{"jsonrpc": "2.0", "id": identifier, "error": map[string]any{"code": code, "message": message}}))
+}
+
+// relayInteractionAnswer denormalizes a client's neutral interaction answer into
+// the provider result and relays it to the agent. A malformed answer fails
+// closed: the agent receives an error rather than an unparseable payload, and
+// the client is told its answer was rejected.
+func (hubInstance *Hub) relayInteractionAnswer(object map[string]any, route reverseRequestRoute, client *clientConnection, clientIdentifier any) {
+	if hubInstance.protocol == nil {
+		return
+	}
+	if errorPayload, present := object["error"]; present {
+		hubInstance.sendAgentJSONForGeneration(route.agentGeneration, map[string]any{
+			"jsonrpc": "2.0", "id": route.identifier, "error": errorPayload,
+		})
+		return
+	}
+	rawResult, _ := object["result"].(map[string]any)
+	var response providerapi.InteractionResponse
+	if decodeError := decodeInteractionResponse(rawResult, &response); decodeError != nil {
+		hubInstance.replyInteractionUnavailable(route.identifier, "invalid interaction answer", route.agentGeneration)
+		hubInstance.sendRPCError(client, clientIdentifier, decodeError.Error(), methodNotCallableErrorCode)
+		return
+	}
+	providerResult, denormalizeError := hubInstance.protocol.DenormalizeInteractionResponse(route.interactionKind, response)
+	if denormalizeError != nil {
+		hubInstance.replyInteractionUnavailable(route.identifier, "invalid interaction answer", route.agentGeneration)
+		hubInstance.sendRPCError(client, clientIdentifier, denormalizeError.Error(), methodNotCallableErrorCode)
+		return
+	}
+	if operationError := hubInstance.sendAgentJSONForGeneration(route.agentGeneration, map[string]any{
+		"jsonrpc": "2.0", "id": route.identifier, "result": providerResult,
+	}); operationError != nil {
+		hubInstance.logger.Warn("interaction answer dropped", "error", operationError)
+	}
+}
+
+func decodeInteractionResponse(rawResult map[string]any, response *providerapi.InteractionResponse) error {
+	if rawResult == nil {
+		return errors.New("interaction answer missing result")
+	}
+	encoded, marshalError := json.Marshal(rawResult)
+	if marshalError != nil {
+		return marshalError
+	}
+	return json.Unmarshal(encoded, response)
 }

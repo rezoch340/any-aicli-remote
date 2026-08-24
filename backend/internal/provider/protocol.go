@@ -45,6 +45,7 @@ const (
 	KillTerminalOperation
 	ReleaseTerminalOperation
 	PermissionOperation
+	InteractionOperation
 )
 
 type ReverseRequest struct {
@@ -89,4 +90,10 @@ type ProtocolAdapter interface {
 	NormalizeAgentNotification(method string, params map[string]any) (string, map[string]any)
 	ClassifyReverseRequest(method string, params map[string]any) (ReverseRequest, bool)
 	DaemonNotification(NotificationKind, map[string]any) (string, map[string]any)
+	// NormalizeInteractionRequest converts a provider reverse interaction request
+	// into the neutral typed form. It is called only for InteractionOperation.
+	NormalizeInteractionRequest(method string, params map[string]any) (InteractionRequest, bool)
+	// DenormalizeInteractionResponse converts a neutral interaction answer back
+	// into the provider result payload for the given interaction kind.
+	DenormalizeInteractionResponse(kind InteractionKind, response InteractionResponse) (map[string]any, error)
 }

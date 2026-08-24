@@ -155,6 +155,8 @@ func (providerInstance *testProvider) ClassifyReverseRequest(method string, para
 		request.Operation = providerapi.ReleaseTerminalOperation
 	case "session/request_permission":
 		request.Operation = providerapi.PermissionOperation
+	case "_x.ai/ask_user_question", "_x.ai/exit_plan_mode":
+		request.Operation = providerapi.InteractionOperation
 	default:
 		if strings.HasPrefix(method, "terminal/") {
 			return request, true
@@ -162,6 +164,43 @@ func (providerInstance *testProvider) ClassifyReverseRequest(method string, para
 		return providerapi.ReverseRequest{}, false
 	}
 	return request, true
+}
+
+func (providerInstance *testProvider) NormalizeInteractionRequest(method string, params map[string]any) (providerapi.InteractionRequest, bool) {
+	sessionID := stringValue(params["sessionId"])
+	toolCallID := stringValue(params["toolCallId"])
+	if sessionID == "" || toolCallID == "" {
+		return providerapi.InteractionRequest{}, false
+	}
+	request := providerapi.InteractionRequest{SessionID: sessionID, ToolCallID: toolCallID}
+	switch method {
+	case "_x.ai/exit_plan_mode":
+		request.Kind = providerapi.InteractionKindExitPlan
+		request.PlanContent = stringValue(params["planContent"])
+		return request, true
+	case "_x.ai/ask_user_question":
+		request.Kind = providerapi.InteractionKindAskQuestion
+		request.Questions = []providerapi.InteractionQuestion{{Question: "pick", Options: []providerapi.InteractionOption{{Label: "a"}}}}
+		return request, true
+	default:
+		return providerapi.InteractionRequest{}, false
+	}
+}
+
+func (providerInstance *testProvider) DenormalizeInteractionResponse(kind providerapi.InteractionKind, response providerapi.InteractionResponse) (map[string]any, error) {
+	if kind == providerapi.InteractionKindExitPlan {
+		if response.Outcome != providerapi.InteractionOutcomeApproved && response.Outcome != providerapi.InteractionOutcomeCancelled && response.Outcome != providerapi.InteractionOutcomeAbandoned {
+			return nil, errors.New("invalid exit-plan outcome")
+		}
+		return map[string]any{"outcome": string(response.Outcome)}, nil
+	}
+	if response.Outcome != providerapi.InteractionOutcomeAccepted {
+		return nil, errors.New("invalid ask outcome")
+	}
+	if len(response.Answers) == 0 {
+		return nil, errors.New("empty answers")
+	}
+	return map[string]any{"outcome": "accepted", "answers": response.Answers}, nil
 }
 
 func (providerInstance *testProvider) DaemonNotification(kind providerapi.NotificationKind, params map[string]any) (string, map[string]any) {

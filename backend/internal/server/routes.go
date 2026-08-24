@@ -103,7 +103,7 @@ func (server *Server) configBasePayload() map[string]any {
 		"ide":         false,
 		"auth":        server.configuration.PairingSecret != "",
 		"clients":     server.hub.ClientCount(),
-		"features":    []string{"fs", "terminal", "multi-client-hub", "skills-scan", "git", "project-context", "session-cancel", "session-history", "child-agent-events", "permission-routing", "voice-tts", "remote-loop", "effort"},
+		"features":    []string{"fs", "terminal", "multi-client-hub", "skills-scan", "git", "project-context", "session-cancel", "session-history", "child-agent-events", "permission-routing", "structured-interaction", "voice-tts", "remote-loop", "effort"},
 	}
 }
 

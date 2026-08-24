@@ -214,12 +214,14 @@ func (providerInstance *GrokProvider) ClassifyReverseRequest(method string, para
 		request.Operation = providerapi.KillTerminalOperation
 	case acp.ClientMethodTerminalRelease:
 		request.Operation = providerapi.ReleaseTerminalOperation
+	case grokMethodAskUserQuestion, grokMethodExitPlanMode:
+		request.Operation = providerapi.InteractionOperation
 	default:
 		if strings.HasPrefix(strings.ToLower(method), "terminal/") {
 			return request, true
 		}
 		lowerMethod := strings.ToLower(method)
-		if method == acp.ClientMethodSessionRequestPermission || method == "session/requestPermission" || strings.Contains(lowerMethod, "permission") || strings.Contains(lowerMethod, "ask_user") {
+		if method == acp.ClientMethodSessionRequestPermission || method == "session/requestPermission" || strings.Contains(lowerMethod, "permission") {
 			request.Operation = providerapi.PermissionOperation
 		} else {
 			return providerapi.ReverseRequest{}, false
