@@ -121,6 +121,8 @@ final class TurnCoordinator {
     else { return }
 
     switch notification {
+    case .childAgent(let card):
+      store.childAgents = ChildAgentReducer.apply(store.childAgents, incoming: card)
     case .sessionUpdate(let update):
       // session/load 会把整轮对话重放一遍。历史快照已经包含这些内容，再追加就会让
       // 用户消息、思考与回复各出现两次，且重启后回显去重表是空的，拦不住重放。

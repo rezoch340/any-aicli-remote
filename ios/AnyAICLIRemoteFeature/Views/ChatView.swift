@@ -24,6 +24,8 @@ struct ChatView: View {
     }
 
     private var chatContent: some View {
+        VStack(spacing: 0) {
+          if !store.childAgents.isEmpty { ChildAgentStripView(cards: store.childAgents) }
         ChatMessageCollectionView(
             sessionIdentity: session.id,
             blocks: store.blocks,
@@ -69,6 +71,7 @@ struct ChatView: View {
                     onStop: { store.cancel() }
                 )
             }
+        }
         }
     }
 

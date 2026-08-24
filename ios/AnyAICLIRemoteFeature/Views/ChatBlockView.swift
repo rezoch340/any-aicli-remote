@@ -60,6 +60,8 @@ private struct AssistantMessage: View {
             MarkdownText(block.text, isStreaming: isStreaming, onRender: onRender)
         }
         .accessibilityIdentifier("assistant-message")
+        .accessibilityLabel("助手")
+        .accessibilityValue(block.text)
         .accessibilityElement(children: .contain)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)

@@ -5,6 +5,7 @@ enum ChatNotification {
   case sessionUpdate([String: Any])
   case sessionsChanged
   case permission(PermissionRequest)
+  case childAgent(ChildAgentCard)
 }
 
 struct PermissionRequest {
@@ -16,6 +17,15 @@ struct PermissionRequest {
 enum ChatNotificationMapper {
   static func map(payload: [String: Any], selectedSessionID: SessionIdentity?) -> ChatNotification? {
     let method = payload.string("method") ?? ""
+    if method == ACPWire.Method.childAgentUpdate {
+      guard let selectedSessionID,
+        let parameters = payload.object("params"),
+        ACPWire.matchesSessionIdentity(parameters, expected: selectedSessionID),
+        let event = parameters.object("event"),
+        let card = ChildAgentPayloadMapper.card(fromEvent: event)
+      else { return nil }
+      return .childAgent(card)
+    }
     if method == ACPWire.Method.sessionUpdate {
       guard let selectedSessionID else { return nil }
       let parameters = payload.object("params") ?? [:]

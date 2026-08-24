@@ -40,6 +40,7 @@ final class SessionCoordinator {
     ownership.resetTurnTracking()
     store.selectedSession = session
     store.blocks = []
+    store.childAgents = []
     store.isBusy = false
     store.closeWorkspaceFilePicker(clearSelection: true)
     store.statusMessage = "同步历史"
@@ -60,6 +61,7 @@ final class SessionCoordinator {
     ownership.resetTurnTracking()
     store.selectedSession = nil
     store.blocks = []
+    store.childAgents = []
     store.isBusy = false
     store.closeWorkspaceFilePicker(clearSelection: true)
     store.statusMessage = store.connection == .connected ? "已连接" : ""
@@ -90,6 +92,7 @@ final class SessionCoordinator {
       store.isSessionLoading = false
       ownership.resetTurnTracking()
       store.selectedSession = nil
+      store.childAgents = []
       ownership.advanceSession()
       ownership.mountedSessionIdentity = nil
       if let session = try SessionPayloadMapper.createdSession(
@@ -126,6 +129,7 @@ final class SessionCoordinator {
       let history = try SessionPayloadMapper.history(from: response, fallback: session)
       applyAuthoritativeSession(history.session)
       store.blocks = history.blocks
+      store.childAgents = history.childAgents
     } catch {
       guard !Task.isCancelled, ownership.ownsSession(context) else { return }
       store.statusMessage = "历史暂不可用：\(error.localizedDescription)"

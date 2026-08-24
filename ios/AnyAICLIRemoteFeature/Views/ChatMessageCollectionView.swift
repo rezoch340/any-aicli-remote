@@ -156,6 +156,9 @@ struct ChatMessageCollectionView: UIViewRepresentable {
                 collection.alpha = 0
                 models.removeAll()
             }
+            if owner.streamingAssistantID != nil && !didAppear {
+                revealStreamingContent(in: collection)
+            }
             var modelChanged = false
             for block in owner.blocks {
                 if let model = models[block.id] {
@@ -198,6 +201,15 @@ struct ChatMessageCollectionView: UIViewRepresentable {
             }
             if lastBusy && !owner.isBusy { needsFinalFlush = true; requestLayout() }
             lastBusy = owner.isBusy
+        }
+
+        private func revealStreamingContent(in collection: UICollectionView) {
+            initialRevealPending = false
+            initialRevealStartedAt = nil
+            initialRevealStableSince = nil
+            sessionLoadClampDeadline = nil
+            didAppear = true
+            collection.alpha = 1
         }
 
         private func initialRevealReady() -> Bool {

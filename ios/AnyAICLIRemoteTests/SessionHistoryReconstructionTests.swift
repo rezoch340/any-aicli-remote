@@ -19,4 +19,15 @@ final class SessionHistoryReconstructionTests: XCTestCase {
     XCTAssertEqual(blocks[3].toolState, .success)
     XCTAssertEqual(blocks.map(\.text), ["rules", "hello", "hi", ""])
   }
+
+  func testReconstructsTopLevelChildAgentsAndIgnoresBadRecords() throws {
+    let fallback = try XCTUnwrap(SessionSummary(json: ["providerId": "p", "sessionId": "s"]))
+    let result = try SessionPayloadMapper.history(from: [
+      "session": ["providerId": "p", "sessionId": "s"], "messages": [["role": "user", "content": "hello"]],
+      "childAgents": [["providerChildId": "a", "status": "running"], ["providerChildId": "  "]]
+    ], fallback: fallback)
+    XCTAssertEqual(result.childAgents.map(\.providerChildID), ["a"])
+    XCTAssertEqual(result.blocks.count, 1)
+    XCTAssertFalse(result.blocks.contains { $0.text == "a" })
+  }
 }

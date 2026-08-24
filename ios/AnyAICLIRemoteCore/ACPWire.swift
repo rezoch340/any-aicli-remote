@@ -7,6 +7,7 @@ public enum ACPWire {
     public static let sessionPrompt = "session/prompt"
     public static let sessionCancel = "session/cancel"
     public static let sessionUpdate = "session/update"
+    public static let childAgentUpdate = "session/child_agent_update"
     public static let sessionsChanged = "sessions/changed"
   }
 

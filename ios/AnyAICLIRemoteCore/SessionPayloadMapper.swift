@@ -4,6 +4,7 @@ public enum SessionPayloadMapper {
   public struct SessionHistoryResult {
     public let session: SessionSummary
     public let blocks: [ChatBlock]
+    public let childAgents: [ChildAgentCard]
   }
 
   public static func sessions(from response: [String: Any]) throws -> [SessionSummary] {
@@ -28,7 +29,10 @@ public enum SessionPayloadMapper {
     else {
       throw ClientError.malformedResponse
     }
-    return SessionHistoryResult(session: session, blocks: chatBlocks(from: messages))
+    let childAgents = (response["childAgents"] as? [[String: Any]] ?? []).compactMap {
+      ChildAgentPayloadMapper.card(from: $0)
+    }
+    return SessionHistoryResult(session: session, blocks: chatBlocks(from: messages), childAgents: childAgents)
   }
 
   public static func createdSession(

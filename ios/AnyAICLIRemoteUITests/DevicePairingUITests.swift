@@ -121,17 +121,20 @@ final class DevicePairingUITests: XCTestCase {
         let composer = application.descendants(matching: .any)["chat-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         composer.tap()
-        composer.typeText("请不要调用工具。请连续输出四十行编号短句，每行内容不同，用于测试移动端流式吐字与自动滚动。最后单独输出由 AUTOSCROLL、END、MARKER 三段拼接成的全大写字符串，不要分隔符。")
+        composer.typeText("请不要调用工具。请连续输出至少八十行编号短句，每行内容不同，用于测试移动端流式吐字与自动滚动。最后单独输出 AUTOSCROLLENDMARKER。")
         application.buttons["发送"].tap()
         XCTAssertTrue(application.staticTexts["等待助手"].waitForExistence(timeout: 10))
         XCTAssertTrue(application.buttons["停止生成"].waitForExistence(timeout: 5))
         attachScreenshot(named: "streaming-started")
         let chatStatus = application.descendants(matching: .any)["chat-status"]
+        try awaitStreamingSnapshots(application: application, status: chatStatus)
         let completedPredicate = NSPredicate(format: "label == %@ OR value == %@", "完成", "完成")
         let completedExpectation = XCTNSPredicateExpectation(predicate: completedPredicate, object: chatStatus)
         wait(for: [completedExpectation], timeout: 120)
-        let markerPredicate = NSPredicate(format: "label CONTAINS %@", "AUTOSCROLLENDMARKER")
-        let markerText = application.textViews.matching(markerPredicate).firstMatch
+        let markerPredicate = NSPredicate(
+            format: "identifier == %@ AND value CONTAINS %@", "assistant-message", "AUTOSCROLLENDMARKER"
+        )
+        let markerText = application.descendants(matching: .any).matching(markerPredicate).firstMatch
         XCTAssertTrue(markerText.waitForExistence(timeout: 10))
         assertAssistantAtComposer(application: application)
         attachScreenshot(named: "streaming-completed")
@@ -147,10 +150,64 @@ final class DevicePairingUITests: XCTestCase {
         XCTAssertTrue(application.cells.firstMatch.waitForExistence(timeout: 10))
         application.cells.firstMatch.tap()
         XCTAssertTrue(application.descendants(matching: .any)["chat-composer"].waitForExistence(timeout: 10))
-        let reopenedMarker = application.textViews.matching(markerPredicate).firstMatch
+        let reopenedMarker = application.descendants(matching: .any).matching(markerPredicate).firstMatch
         XCTAssertTrue(reopenedMarker.waitForExistence(timeout: 10))
         assertAssistantAtComposer(application: application)
         attachScreenshot(named: "session-reopened-at-bottom")
+    }
+
+    func testChildAgentCardsAgainstLiveDaemon() throws {
+        guard ProcessInfo.processInfo.environment["ANY_AI_CLI_REMOTE_LIVE_UI_TEST"] == "1" else {
+            throw XCTSkip("Live daemon UI test is opt-in")
+        }
+
+        let application = launchApplication()
+        try addDevice(
+            application: application,
+            name: "模拟器服务",
+            address: "http://127.0.0.1:2421",
+            pairingKeyInput: .file(path: try livePairingKeyFilePath())
+        )
+        let deviceRow = deviceButton(application: application, name: "模拟器服务")
+        try require(deviceRow.waitForExistence(timeout: 10), "未找到模拟器服务")
+        deviceRow.tap()
+        try require(application.navigationBars["模拟器服务"].waitForExistence(timeout: 10), "未进入设备")
+        application.buttons["新建会话"].tap()
+        try require(application.navigationBars["新建会话"].waitForExistence(timeout: 5), "新建会话页未出现")
+        application.buttons["创建"].tap()
+
+        let composer = application.descendants(matching: .any)["chat-composer"]
+        try require(composer.waitForExistence(timeout: 10), "聊天输入框未出现")
+        composer.tap()
+        composer.typeText("请同时启动两个 explore 子 Agent，分别完成两个独立的小型代码库探索任务；必须等待两个子 Agent 都结束后，再回复唯一标记 CHILDAGENTE2EOK。")
+        application.buttons["发送"].tap()
+        let strip = application.descendants(matching: .any)["child-agent-strip"]
+        try require(strip.waitForExistence(timeout: 30), "子 Agent 区域未出现")
+        try awaitChildAgentCardCount(application: application, minimum: 2, timeout: 60)
+        try awaitTerminalChildAgentCard(application: application, timeout: 180)
+        attachScreenshot(named: "child-agents-live")
+
+        let chatStatus = application.descendants(matching: .any)["chat-status"]
+        let completed = NSPredicate(format: "label == %@ OR value == %@", "完成", "完成")
+        try require(expect(chatStatus, matching: completed, timeout: 180), "聊天未完成")
+        let markerPredicate = NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@", "CHILDAGENTE2EOK", "CHILDAGENTE2EOK"
+        )
+        let marker = application.descendants(matching: .any).matching(markerPredicate).firstMatch
+        try require(marker.waitForExistence(timeout: 30), "未找到 CHILDAGENTE2EOK 标记")
+
+        application.terminate()
+        application.launchArguments.removeAll { $0 == resetArgument }
+        application.launch()
+        let reopenedDevice = deviceButton(application: application, name: "模拟器服务")
+        try require(reopenedDevice.waitForExistence(timeout: 10), "重启后未找到设备")
+        reopenedDevice.tap()
+        try require(application.navigationBars["模拟器服务"].waitForExistence(timeout: 10), "重启后未进入设备")
+        try require(application.cells.firstMatch.waitForExistence(timeout: 10), "未找到历史会话")
+        application.cells.firstMatch.tap()
+        try require(composer.waitForExistence(timeout: 10), "历史会话输入框未出现")
+        try awaitChildAgentCardCount(application: application, minimum: 2, timeout: 60)
+        attachScreenshot(named: "child-agents-history")
     }
 
     private func livePairingKeyFilePath() throws -> String {
@@ -200,6 +257,30 @@ final class DevicePairingUITests: XCTestCase {
         let ready = NSPredicate(format: "exists == true AND isHittable == true")
         try require(expect(deviceList, matching: ready, timeout: 5), "保存后未返回可操作设备页")
         try require(expect(deviceRow, matching: ready, timeout: 5), "保存后未显示可操作目标设备")
+    }
+
+    private func awaitChildAgentCardCount(application: XCUIApplication, minimum: Int, timeout: TimeInterval) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        let cards = application.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "child-agent-card-"))
+        while Date() < deadline {
+            if cards.count >= minimum { return }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        throw UIFlowError.message("子 Agent 卡片数量不足：期望至少 \(minimum)，实际 \(cards.count)")
+    }
+
+    private func awaitTerminalChildAgentCard(application: XCUIApplication, timeout: TimeInterval) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        let terminalValues = Set(["已完成", "失败", "已取消"])
+        let cards = application.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "child-agent-card-"))
+        while Date() < deadline {
+            for index in 0..<cards.count {
+                let value = cards.element(boundBy: index).value as? String
+                if let value, terminalValues.contains(value) { return }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        throw UIFlowError.message("未等到子 Agent 卡片进入终态（已完成/失败/已取消）")
     }
 
     private func dismissPasswordAutofillPromptIfPresent(application: XCUIApplication) throws {
@@ -289,6 +370,7 @@ final class DevicePairingUITests: XCTestCase {
 
     private enum UIFlowError: Error {
         case stepFailed
+        case message(String)
     }
 
     private func deviceButton(application: XCUIApplication, name: String) -> XCUIElement {
@@ -313,6 +395,30 @@ final class DevicePairingUITests: XCTestCase {
         let composerGap = composerFrame.minY - assistantFrame.maxY
         XCTAssertGreaterThanOrEqual(composerGap, minimumVisibleOverlap)
         XCTAssertLessThanOrEqual(composerGap, maximumComposerGap)
+    }
+
+    private func awaitStreamingSnapshots(application: XCUIApplication, status: XCUIElement) throws {
+        let messages = application.descendants(matching: .any).matching(identifier: "assistant-message")
+        let completed = NSPredicate(format: "label == %@ OR value == %@", "完成", "完成")
+        var lengths: [Int] = []
+        let deadline = Date().addingTimeInterval(90)
+        while Date() < deadline {
+            if completed.evaluate(with: status) {
+                XCTFail("流式尚未观察到三个增长快照就已完成")
+                throw UIFlowError.stepFailed
+            }
+            if messages.count > 0 {
+                let value = messages.element(boundBy: messages.count - 1).value as? String ?? ""
+                if !value.isEmpty, value.count > (lengths.last ?? 0) { lengths.append(value.count) }
+                if lengths.count >= 3 && lengths[0] < lengths[1] && lengths[1] < lengths[2] {
+                    attachScreenshot(named: "streaming-intermediate")
+                    return
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTFail("90秒内未观察到三个严格增长的流式文本快照：\(lengths)")
+        throw UIFlowError.stepFailed
     }
 
     private func attachScreenshot(named name: String) {

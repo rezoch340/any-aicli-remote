@@ -45,10 +45,10 @@ then include the checkbox update in that feature's commit.
   - [x] 以真实 Grok 守护进程完成两端联调，修复联调暴露的四个缺陷：历史重建泄漏 provider 内部脚手架、Android 代码块缺语法高亮、iOS cell 复用残留上一条消息、两端重开会话叠加 provider 历史重放。
   - Commits: `b1815b4..90df229`（♻️ 拆分系列与 🐛 修复系列）
 
-- [ ] **5. 子 Agent 实时卡片**
+- [x] **5. 子 Agent 实时卡片**
   - [x] Backend first: represent each child Agent as a stable typed entity and emit ordered lifecycle/update events rather than asking clients to parse terminal or Markdown text.
   - [x] Prove backend event identity, ordering, reconnect replay, history reconstruction, completion, failure, and cancellation with protocol tests before touching app UI.
-  - [ ] Android next and iOS after it: render the typed card and validate concurrent child Agents, reconnect/history reconstruction, out-of-order updates, completion, failure, and cancellation on both platforms.
+  - [x] Android next and iOS after it: render the typed card and validate concurrent child Agents, reconnect/history reconstruction, out-of-order updates, completion, failure, and cancellation on both platforms.
   - Commit: `✨ 聊天：新增子 Agent 实时状态卡片`
 
 - [ ] **6. 结构化交互合同（ask / exit plan）**
