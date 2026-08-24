@@ -2,118 +2,126 @@
 
 ## 1. 当前状态
 
-Phase 0 全栈模块化**已完成并推送**。TODO 5 功能门禁**已解除**，可以开始
-Phase 1 backend interaction contract。
+- 后端 item 5（子 Agent）与 item 6（结构化交互 ask/exit）**已完成、已提交、已推送**，合同冻结。
+- **Android item 5 + 6 客户端代码已写完，全量静态门禁通过，但尚未提交、尚未真机验证。**
+  工作区有 10 改 + 9 新（`git status` 见下），行数约 +760。
+- iOS item 5 + 6 客户端**未开始**。
+- item 7 发布未开始。
 
-全部 commit 已推送到 `origin/main`，工作区除本文件外干净。真机联调发现的
-四个缺陷均已修复并验证。
+优先级：Android 这批**先真机验证再提交**（静态门禁不覆盖真实交互），然后按 AGENTS.md
+顺序做 iOS。
 
-## 2. 未解决问题
+## 2. 未提交的 Android 改动（本次工作）
 
-无。上一版交接里记录的 iOS 重开会话滚动问题已定位并修复，见第 3 节。
+按模块拆分，未往 ViewModel/reducer 堆实现——`ChatEventReducer.reduceNotification`
+只加了两行分发，状态变换全在独立纯函数/控制器里。
 
-## 3. 本轮完成的工作
+### 新增文件
+- `core/model/ChildAgent.kt` — `ChildAgentCard`、`ChildAgentStatus`、`childAgentStatus()`。
+- `core/model/Interaction.kt` — `PendingInteraction`、`InteractionKind`、`InteractionQuestion`、
+  `InteractionOption`、`InteractionAnswer`（sealed：Accept/ChatAbout/SkipInterview/Approve/
+  Cancel/Abandon）。
+- `core/chat/ChildAgentReducer.kt` — 纯函数：按 providerChildId 合并、sequence 代际去重、
+  终态不被旧事件覆盖、空字段不擦除已有值。
+- `core/session/InteractionAnswerCodec.kt` — typed 答案 → 中立 JSON。**answers 必须编码成
+  JSON object（键=问题索引串），发数组会被 daemon 拒**。
+- `feature/ui/InteractionController.kt` — 应答/取消 pending 交互，带 rpcId 校验。
+- `feature/ui/components/ChildAgentStrip.kt` — 横向卡片条（展示态，不渲染 prompt/输出）。
+- `feature/ui/components/InteractionSheet.kt` — ModalBottomSheet：AskForm（多问题多选/单选 +
+  提交/跳过）、PlanApproval（计划正文 + 批准/取消带 feedback）。
 
-### Phase 0 模块化（11 个 ♻️ commit）
+### 改动文件
+- `core/remote/ACPEventDecoder.kt` — 加 `ACPEvent.ChildAgentUpdate`、`ACPEvent.Interaction`
+  两个变体与解码。
+- `core/remote/ACPWire.kt` — 加 `childAgentUpdateMethod`、`interactionRequestMethod` 常量；
+  `classifyIncomingRequest` 认 `session/interaction_request` 为 UI_HANDLED；`isPermissionMethod`
+  删掉 `ask_user` 子串（现在客户端只收中立方法名，那是死代码）。
+- `core/session/SessionController.kt` — `answerInteraction()`；`SessionHistory` 加 `childAgents`；
+  `loadHistory` 填充历史快照。
+- `core/session/SessionPayloadMapper.kt` — `childAgents()` 解析历史 `childAgents` 数组。
+- `feature/ui/ChatUiState.kt` — 加 `childAgents`、`pendingInteraction` 字段。
+- `feature/ui/ChatEventReducer.kt` — dispatch 两个新事件（带 session 守卫），委派纯函数。
+- `feature/ui/SessionCoordinator.kt` — 打开/关闭会话时重置 childAgents+pendingInteraction，
+  历史加载时填充 childAgents。
+- `feature/ui/ChatViewModel.kt` — 接入 InteractionController，暴露 answerInteraction/
+  dismissInteraction。
+- `feature/ui/screens/ChatScreen.kt` — ChatContent 顶部渲染 ChildAgentStrip；根部挂
+  InteractionSheet。
+- `core/remote/ACPWireTest.kt` — 把 `session/ask_user` 断言改为 `session/interaction_request`。
 
-三栈最大生产文件从 587 行降到 372 行（372 那个本来就不在清单上）。
+### 已有测试
+- `core/chat/ChildAgentReducerTest.kt`（4）：插入保序、原地合并、乱序 stale 丢弃、空字段不擦除。
+- `core/session/InteractionAnswerCodecTest.kt`（5）：accept 的 answers 是 object、approve 无
+  feedback、cancel 空 feedback 省略、abandon、chat/skip 的 partialAnswers。
 
-- 后端 13 个文件按 owner 拆分。Hub 按方向拆为
-  `agentdispatch`/`clientrpc`/`pending` + `clienttransport`/`agenttransport`，
-  连接代际与归属校验只在 `agenttransport.go` 保留一份规范实现。
-- Android `ChatViewModel` 587 → 143，取消与代际收敛进 `ChatOperationScope`，
-  设备/连接/会话/工作区/turn 各有协调器。
-- iOS `ChatStore` 536 → 130，同样分工，代际归属收敛进 `ChatOwnership`。
+## 3. 接手者第一步：Android 真机验证
 
-每个后端包都比对了函数清单、导出 API、测试结果三项一致；Android 与 iOS 的
-ViewModel/Store 拆分在拆前拆后各跑一次真机 E2E 并逐条比对用例清单。
+静态门禁（unit+detekt+lint+assembleDebug）**已过**，但没验真实交互。必须做：
 
-### 真实链路联调发现并修掉的两个缺陷
+1. daemon：`(cd backend && go build -o <tmp>/daemon ./cmd/any-aicli-remote-daemon)`，
+   `-pairing-secret-file`（600 临时文件）、`-provider-path ~/.grok/bin/grok`、端口 2421。
+   配对密钥在钥匙串：服务 `com.anyaicliremote.launcher`、账户 `pairing-secret`。
+2. Android 模拟器是 **MuMu**（不是 AVD）：`adb connect 127.0.0.1:5555`，API 32 / arm64。
+   `adb reverse tcp:2421 tcp:2421`。`./gradlew installDebug`。
+3. **子 Agent 卡片**：发一个会 spawn 子 Agent 的 prompt（真实 grok 会用 explore/code
+   子 Agent），看聊天顶部卡片条出现、状态从运行中→已完成。重开会话验历史快照。
+4. **交互**：发 `/plan 为空目录设计缓存层，规划前先用 ask_user_question 问我 Redis 还是
+   进程内 LRU`。应看到 AskForm 弹出→选一项提交→agent 继续→随后 exit_plan 的 PlanApproval
+   弹出→批准。（wire 与应答形状见记忆 `grok-ask-exit-wire`。）
+5. `./scripts/android-connected-e2e.sh` 回归。
+6. 验完再提交（一个 `✨ 聊天：新增子 Agent 实时状态卡片` 或按 TODO 的 commit 文案）。
 
-**`2951609` 后端：历史重建不再把 provider 内部脚手架当对话**
+## 4. iOS 待做（item 5 + 6，Android 之后）
 
-`/api/sessions/{id}/messages` 原样放行了 Grok CLI 写进 `chat_history.jsonl`
-的记账内容。实测一个会话 6 条消息里只有 1 条是真内容，其余是系统提示、
-`<user_info>`、`<system-reminder>` skill 目录（含本机绝对路径）、MCP 清单，
-真实输入还被包在 `<user_query>` 里。两端都渲染出巨型垃圾气泡。
+按冻结的中立 payload 实现等价功能，**不复制 wire 解析**：
+- 解码 `session/child_agent_update`、`session/interaction_request`（带 id 反向请求）。
+- reducer/state：childAgents 列表（代际去重）、pendingInteraction。
+- 应答：`InteractionAnswerCodec` 等价，answers 编码成 map。
+- UI：子 Agent 卡片 + 交互 sheet（ask 表单 + plan 批准）。
+- 历史：`/messages` 响应的 `childAgents` 快照。
+- iOS 参照 `ios/AnyAICLIRemoteFeature` 现有 ChatStore/协调器结构，同样拆模块。
 
-在适配器边界剥离。标签清单
-（`system-reminder`/`user_info`/`rules`/`git_status`）取自 60 个真实会话实测，
-不是文档推断。回归：user 轮次 213 → 177，残留脚手架标签为零。
+## 5. 冻结的后端合同（客户端只消费中立 payload，绝不解析 _x.ai wrapper）
 
-注意：`<user_query>` **不是**每轮都有——多数已存会话的 user 轮次是纯文本无
-包装。任何「只保留 user_query 内容」的简化都会把真实消息全丢掉。
+### 子 Agent（item 5，commit 9549f5a + d08b51d）
+- 通知方法 `session/child_agent_update`，params `{sessionId, event}`。
+  `event = {eventId, sequence?, occurredAt, replay, kind, agent}`。
+  `kind`：started/progress/completed/failed/cancelled/updated。
+  `agent`（ChildAgentRecord）字段 camelCase：providerChildId、childSessionId、agentType、
+  description、status（running/completed/failed/cancelled/unknown）、startedAt、completedAt、
+  toolCallCount、turnCount、modelId、tokensUsed、contextUsagePercent…
+- 历史快照：`/api/sessions/{id}/messages` 响应的 `childAgents: [ChildAgentRecord]`。
+- 排序/去重靠 `sequence`（来自 eventId 后缀）；未知终态冒泡为 unknown/updated（有测试钉住）。
 
-**`22a4f3a` Android：代码块补齐语法高亮并修正深色主题**
+### 结构化交互（item 6，commit 98e149a）
+- daemon 把 grok 私有 `_x.ai/ask_user_question`、`_x.ai/exit_plan_mode`（**带 id 反向请求**）
+  归一为中立 `session/interaction_request`（**仍带 id**），params：
+  `{kind: ask_question|exit_plan, sessionId, toolCallId, questions[{question,
+  options[{label,description}], multiSelect}], planContent, mode}`。
+- 应答：客户端对该 id 回 JSON-RPC `result`，中立形状：
+  - exit：`{outcome: approved}` / `{outcome: cancelled, feedback?}` / `{outcome: abandoned}`
+  - ask：`{outcome: accepted, answers: {"0":["label"]}}`（answers 必须 object）/
+    `{outcome: chat_about_this, partialAnswers}` / `{outcome: skip_interview, partialAnswers}`
+- daemon 复用 permission 的 session 定向 + first-answer-wins + 断连取消；交互失败一律回
+  JSON-RPC error（与 agent 断连后「重现」一致）；unknown/畸形 fail closed。
+- 完整实测细节见记忆 `grok-ask-exit-wire`；应答枚举以开源 `xai-org/grok-build` 源码为准。
 
-iOS 用 `SwiftStreamingMarkdown` 自带高亮，Android 只装了 mikepenz 渲染器的
-基础包与 m3 包。加入同版本 `-code-android:0.38.1`（不升级），并固定
-`SyntaxThemes.default(darkMode = true)`：库默认跟随 `isSystemInDarkTheme()`，
-而聊天区恒为深色，浅色系统下会选出深色标点，括号与箭头直接不可见。
+## 6. TODO 勾选状态
 
-### 真机联调发现并修掉的另外两个缺陷
+- item 5：后端两条子项已勾（d08b51d）；客户端子项未勾（Android 已写未提交，iOS 未做）。
+- item 6：后端四条子项已勾（48a94f1）；客户端子项未勾。
+- 顶层 item 5、6 未勾，因为客户端未完成。按 AGENTS.md，勾选与功能提交同一个 commit。
 
-**`8070377` iOS：cell 复用残留上一条消息**
+## 7. 验收命令
 
-`cellRegistration` 在 `models` 取不到模型时直接 return，没重设
-`contentConfiguration`，复用的 cell 于是留着上一条消息的内容。改为就地按
-当前 block 补建模型，取不到才清空配置。
+- 后端：`./scripts/check-go-quality.sh`（当前通过）。
+- Android：`testDebugUnitTest detekt lintDebug assembleDebug`（当前通过）+
+  `./scripts/android-connected-e2e.sh`（真机，未跑）。
+- iOS：`xcodegen` + `check-native-source-quality.sh` + `xcodebuild test` 模拟器 +
+  `scripts/ios-live-daemon-e2e.sh`（需 `IOS_SIMULATOR_ID`）。
 
-**`956d535` 两端：重开会话叠加 provider 历史重放**
+## 8. 不要做
 
-打开会话先用 `/messages` 落地权威历史，随后的 `session/load` 会让 provider
-把整轮对话作为 `session/update` 重放。两端都把重放直接追加到已有历史上，
-于是用户消息、思考与回复各出现两次；进程重启后回显去重表为空，拦不住重放。
-
-两端对称加挂载标记，挂载 RPC 期间丢弃重放的 `session/update`。这是定位过程
-里唯一靠日志坐实的结论——中途我基于像素做过几次推断都是错的，最后是在
-`SessionCoordinator` 与 `TurnCoordinator` 各插一行 `NSLog` 才看清楚：
-
-```
-DBGHIST loaded blocks=2 kinds=user,assistant
-DBGEVT user_message_chunk  blocksBefore=2
-DBGEVT agent_thought_chunk blocksBefore=3
-DBGEVT agent_message_chunk blocksBefore=4
-```
-
-接手者若再遇到「界面对不上数据」，建议直接走这条路：先确认后端返回，再打
-日志看客户端拿到什么，不要从截图反推。
-
-## 4. 验收命令与本轮结果
-
-| 栈 | 命令 | 本轮结果 |
-|---|---|---|
-| Backend | `./scripts/check-go-quality.sh` | 通过（38 包 + race + vet） |
-| Android | `testDebugUnitTest detekt lintDebug assembleDebug` | 通过 |
-| Android | `./scripts/android-connected-e2e.sh` | 16 用例 0 失败 |
-| iOS | `xcodegen` + `check-native-source-quality.sh` | 0 违规 / 46 文件 |
-| iOS | `xcodebuild test`（模拟器） | 37 用例 0 失败 |
-| iOS | `scripts/ios-live-daemon-e2e.sh` | 2 用例全通过 |
-
-`xcodebuild test` 里那 2 个 live 用例是 **SKIPPED**，不能当作 live 链路的验证。
-判断 iOS 真实链路必须单独跑 `ios-live-daemon-e2e.sh`。
-
-## 5. 真机联调环境搭法
-
-- Android 模拟器是 **MuMu**（不是 AVD，`emulator -list-avds` 是空的）。
-  `adb connect 127.0.0.1:5555`，Android 12 / API 32 / arm64-v8a。
-- 守护进程：`go build -o <path> ./cmd/any-aicli-remote-daemon`，
-  用 `-pairing-secret-file` 传密钥（600 权限临时文件，**不要进命令行参数**），
-  `-provider-path ~/.grok/bin/grok`，默认端口 2421。
-- 配对密钥在钥匙串：服务 `com.anyaicliremote.launcher`，账户 `pairing-secret`。
-- iOS live E2E 需要 `IOS_SIMULATOR_ID`（iPhone 17 Pro:
-  `8B82E4CF-9A2B-4803-A973-28B929ED1F00`）。
-- 联调完记得停 daemon、删临时密钥文件、`adb reverse --remove tcp:2421`。
-
-## 6. 遗留的两处设计取舍
-
-- **iOS 发布属性放宽**：写入方移到协调器后，`devices`、`activeDeviceID`、
-  `isSessionLoading` 等从 `private(set)` 变为模块内可写。视图仍只读。
-- **Android detekt `MatchingDeclarationName`**：跨文件参数契约必须是
-  `internal`，而该规则要求「文件里只有一个非 private 类时文件名必须匹配」。
-  解法是让屏幕文件统一持有其参数契约，不加 baseline、不做抑制。
-
-## 7. 不要做
-
-不要把 plan board 当 `PlanMessage/PlanBlock` 文本卡；不要继续往
-ViewModel/Store/provider.go 塞职责；不要升级依赖；不要创建或切换 worktree。
+不要让客户端解析 `_x.ai/*` wrapper；不要把 plan/子 Agent 当文本卡塞进 ChatBlock（已分别用
+PendingInteraction / ChildAgentCard 独立建模）；不要往 ViewModel/Store/provider.go 堆职责；
+不要升级依赖；不要创建或切换 worktree。
