@@ -52,12 +52,12 @@ then include the checkbox update in that feature's commit.
   - Commit: `✨ 聊天：新增子 Agent 实时状态卡片`
 
 - [ ] **6. 结构化交互合同（ask / exit plan）**
-  - 实测事实（grok 1.0.5 本机抓取，见记忆 grok-ask-exit-wire）：ask/exit **不是** ACP 反向请求，而是 `session/update` 流里的 `tool_call`，判别式为 `_meta["x.ai/tool"].kind`（`ask_user` / `exit_plan`）。与子 Agent 走同一条 `NormalizeAgentNotification` 归一化管线。
-  - [ ] 在 Grok adapter 的 `session/update` 归一化里按 `x.ai/tool.kind` 认出 ask/exit，映射成 provider-neutral typed interaction。`ask_user` 的 `rawInput.questions[{question, options[{label,description}], multi_select}]` 归一为中立 typed 问题；`tool_call` 用 `multi_select`（下划线）而 `tool_call_update` 用 `multiSelect`（驼峰），两处都要认。`plan` 是独立 `sessionUpdate:"plan"`，已是 ACP 形状 `entries[{content,priority,status}]`，直接复用 `coder/acp-go-sdk` 的 `Plan`/`PlanEntry`。exit_plan 的 `rawInput` 为空，计划正文在会话目录 `plan.md`。
-  - [ ] 在 `docs/DEPENDENCY_DECISIONS.md` 记录：复用 acp-go-sdk 的 `Plan`/`PlanEntry`；ask 的 questions/options 是 Grok 私有形状（ACP 的 elicitation 走 JSON Schema 且 agent 不通告该能力，故不套用其类型）；`chat_about_this`/`skip_interview` 等结局在 ACP 无对应物需自定义中立枚举。
-  - [ ] 清理 `internal/provider/grok/protocol.go` 中 `ClassifyReverseRequest` 的 `ask_user` 子串匹配——ask 从不走反向通道，该分支是死代码，删除以免误导；权限分类改为精确匹配。
-  - [ ] 中立契约放 `internal/provider`，provider 私有解析只放 `internal/provider/grok`；Hub 只做 session-scoped first-answer-wins、断连/超时取消与代际校验，unknown 或畸形负载 fail closed。协议测试覆盖 ask/exit 识别、字段归一、两种拼写、未知 kind fail closed、结局回传。
-  - [ ] Android 先、iOS 后：实现 pending 交互 UI、ask 表单与 plan 预览/操作；客户端只消费中立 payload，不解析 provider wrapper。
+  - 实测事实（grok 1.0.5 本机双向抓包 + 开源 xai-org/grok-build 源码交叉确认，见记忆 grok-ask-exit-wire）：ask/exit 是**带 id 的反向请求** `_x.ai/ask_user_question`、`_x.ai/exit_plan_mode`，agent 会阻塞一轮对话等应答。展示帧（session/update 里的 tool_call）另走一条。sessionId/toolCallId/planContent 都在反向请求 params 里。
+  - [x] Grok adapter 归一化：`_x.ai/*` 反向请求 → provider-neutral InteractionRequest（`session/interaction_request`），入向 `NormalizeInteractionRequest`、出向 `DenormalizeInteractionResponse`。exit 应答 `{outcome: approved|cancelled|abandoned, feedback?}`；ask 应答内部标签 outcome，`accepted` 的 answers 必须是 map（键=问题索引），发数组被 agent 拒。反向请求侧用 `multiSelect`（驼峰）。
+  - [x] 在 `docs/DEPENDENCY_DECISIONS.md` 记录：复用 acp-go-sdk 的 envelope 与 Plan 展示类型；ask/exit 的 `_x.ai/*` 请求/应答为 Grok 私有形状，ACP 无对应物，手写最小双向映射；elicitation 能力 agent 不通告，故不套用。
+  - [x] 清理 `internal/provider/grok/protocol.go` 中 `ClassifyReverseRequest` 的 `ask_user` 子串匹配死代码；ask/exit 走 InteractionOperation 精确分类。
+  - [x] 中立契约放 `internal/provider/interaction.go`，私有解析只放 `internal/provider/grok/interaction.go`；Hub 复用 permission 的 session 定向 + first-answer-wins + 断连取消，交互失败一律回 JSON-RPC error，unknown 或畸形请求/应答 fail closed。协议测试（grok 层 + hub 往返）覆盖识别、字段归一、拼写、往返、断连与畸形 fail closed。
+  - [ ] Android 先、iOS 后：实现 pending 交互 UI、ask 表单与 plan 预览/操作；客户端只消费中立 `session/interaction_request`，不解析 provider wrapper。
   - Commit: `✨ 聊天：新增结构化交互与计划确认`
 
 - [ ] **7. 最终发布**
