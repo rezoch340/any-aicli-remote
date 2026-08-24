@@ -3,9 +3,14 @@ import XCTest
 @testable import AnyAICLIRemoteCore
 
 final class JSONRPCBoundaryTests: XCTestCase {
-  func testPermissionAndAskUserAreACPUIRequests() {
+  func testPermissionAndInteractionCategoriesAreExact() {
     XCTAssertTrue(ACPWire.isPermissionRequest(method: "permission/request"))
-    XCTAssertTrue(ACPWire.isPermissionRequest(method: "ask_user"))
+    XCTAssertFalse(ACPWire.isPermissionRequest(method: "ask_user"))
+    XCTAssertEqual(AnyAICLIRemoteClient.incomingRequestCategory("ask_user"), .unknown)
+    XCTAssertEqual(
+      AnyAICLIRemoteClient.incomingRequestCategory(ACPWire.Method.interactionRequest), .interaction)
+    XCTAssertEqual(
+      AnyAICLIRemoteClient.incomingRequestCategory("_x.ai/ask_user_question"), .unknown)
   }
 
   func testPermissionReplyPayloads() {
@@ -61,5 +66,20 @@ final class JSONRPCBoundaryTests: XCTestCase {
       AnyAICLIRemoteClient.incomingRequestCategory(["method": "shell/exec"]),
       .notification
     )
+  }
+
+  func testPermissionRequestAndInteractionNotificationBoundaries() {
+    XCTAssertEqual(
+      AnyAICLIRemoteClient.incomingRequestCategory([
+        "id": 3, "method": "permission/request", "params": [:]
+      ]), .permission)
+    XCTAssertEqual(
+      AnyAICLIRemoteClient.incomingRequestCategory([
+        "id": 3, "method": ACPWire.Method.interactionRequest, "params": [:]
+      ]), .interaction)
+    XCTAssertEqual(
+      AnyAICLIRemoteClient.incomingRequestCategory([
+        "method": ACPWire.Method.interactionRequest, "params": [:]
+      ]), .notification)
   }
 }

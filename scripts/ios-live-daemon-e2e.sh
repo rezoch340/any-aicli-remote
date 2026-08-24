@@ -24,5 +24,7 @@ xcodebuild -skipMacroValidation \
   -only-testing:AnyAICLIRemoteUITests/DevicePairingUITests/testPairAndOpenSessionListAgainstLiveDaemon \
   -only-testing:AnyAICLIRemoteUITests/DevicePairingUITests/testStreamingResponseAutoScrollAgainstLiveDaemon \
   -only-testing:AnyAICLIRemoteUITests/DevicePairingUITests/testChildAgentCardsAgainstLiveDaemon \
+  -only-testing:AnyAICLIRemoteUITests/DevicePairingUITests/testStructuredAskInteractionAgainstLiveDaemon \
+  -only-testing:AnyAICLIRemoteUITests/DevicePairingUITests/testPlanApprovalStartsAtTopAgainstLiveDaemon \
   ANY_AI_CLI_REMOTE_LIVE_PAIRING_KEY_FILE="$secret_file" \
   test

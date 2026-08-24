@@ -263,15 +263,25 @@ libraries. Keep only the smallest compatible dependency or adapter.
   mean UICollectionView self-sizing has stabilized. During growth, capture the old offset, perform a
   no-animation self-sizing layout, restore the old offset, and animate only contentOffset over 0.2s;
   completion then pins precisely. Do not use Timer, DispatchAfter, or raw chunks for scrolling.
+- Streaming animation decision: checked the latest official `v0.7.0` tag. It does not contain a
+  `StreamedMarkdownView` controller fix and upgrading would bring unrelated layout and dependency
+  changes. The required `withShouldAnimateText(value:)` builder already exists in the pinned `v0.6.0`,
+  so streaming uses that builder while completed history keeps `.default` (animation disabled). The
+  boundary is the upstream parser/controller: do not write a second Markdown parser, pacer, or manual
+  character slicer.
 
 ## Apple ACP boundary
 
-- Checked: the official ACP organization and available Swift packages. There is no official maintained
-  Swift ACP SDK equivalent to the Go and Kotlin models; the inspected community Swift implementation did
-  not provide a complete WebSocket client receive path for this app.
-- Decision: retain Foundation `JSONSerialization` for the small iOS transport boundary for now. Keep the
-  JSON-RPC envelope confined to `AnyAICLIRemoteClient`, use typed application models immediately after
-  decoding, and re-evaluate when an official Swift SDK is published.
+- Checked: as of 2026-08-25, the official ACP organization publicly provides maintained SDKs for Rust,
+  Kotlin, Java, Python, and TypeScript, but still no official Swift SDK. The community `wiedymi/swift-acp`
+  project now claims pluggable WebSocket support, but migrating this repository's authenticated WebSocket+
+  generation transport solely to support the repository-owned neutral `session/interaction_request`
+  extension would be materially broader than the missing behavior; that extension is not part of the ACP
+  standard model.
+- Decision: retain Foundation `JSONSerialization` as the sole envelope boundary. Decode the new interaction
+  immediately into typed models and encode it through a small codec; add no dependency and do not create a
+  parallel transport stack. Replace this boundary wholesale only when an official Swift SDK exists or the
+  repository transport is intentionally migrated as a whole.
 
 ## Apple message-list virtualization
 
@@ -379,7 +389,7 @@ is macOS and Linux; renameio's documented platform support does not include Wind
 ## 结构化交互（ask / exit plan）
 
 - Checked: 仓库已用的 [`coder/acp-go-sdk`](https://github.com/coder/acp-go-sdk) `v0.13.5`，其 `Plan`/`PlanEntry`/`UpdatePlan` 覆盖“展示计划”的 sessionUpdate（已是 ACP 形状，直接透传，无需自写）。其 elicitation 类型带 `Unstable` 前缀，且本机 grok agent 的 `initialize` 不通告 elicitation 能力（实测），故 ask/exit 不走 ACP elicitation。
-- Checked: 权威 wire 来源为开源 [`xai-org/grok-build`](https://github.com/xai-org/grok-build)（Rust）。应答类型定义 `ExitPlanModeExtResponse{outcome, feedback?}`（approved|cancelled|abandoned）与 `AskUserQuestionExtResponse`（内部标签 outcome：accepted{answers: map}、chat_about_this、skip_interview{partial_answers}）。ask 的 `answers` 必须是 map（键=问题索引串），发数组会被 agent 拒（"invalid type: sequence, expected a map"）。本仓库通过真实守护进程双向抓包 + 源码交叉确认。
-- Decision: 复用 acp-go-sdk 的 JSON-RPC envelope 与 Plan 展示类型；ask/exit 的 `_x.ai/*` 私有请求/应答为 grok 私有形状，ACP 无对应物，故在 Grok adapter 内手写最小双向映射（入：`NormalizeInteractionRequest`；出：`DenormalizeInteractionResponse`）。中立 typed interaction 放 `internal/provider/interaction.go`，私有解析只放 `internal/provider/grok/interaction.go`。不新增依赖。
+- Checked: 权威 wire 来源为开源 [`xai-org/grok-build` commit `9fabadea800fa6e2ed8ec91c4f45f02b7e2504f4`](https://github.com/xai-org/grok-build/commit/9fabadea800fa6e2ed8ec91c4f45f02b7e2504f4)（Rust）。agent→client 的反向方法是 `_x.ai/ask_user_question`、`_x.ai/exit_plan_mode`；outer params 是 `{method:"x.ai/...", params:{sessionId,toolCallId,...}}` 双层 wrapper，只有 `method` 和 `params` 两个 wrapper 键都缺失时才兼容直接 outer 形状。应答类型定义 `ExitPlanModeExtResponse{outcome, feedback?}`（approved|cancelled|abandoned）与 `AskUserQuestionExtResponse`（内部标签 outcome：accepted{answers: map}、cancelled、chat_about_this、skip_interview{partial_answers}）。client-neutral `accepted.answers` 的键是规范十进制问题索引，发数组会被 agent 拒（"invalid type: sequence, expected a map"）；Grok provider response 的 `answers`、`annotations`、`partial_answers` 必须由 adapter 以原始 question 文本为键。反向请求的选择字段是 `multiSelect`。本仓库通过真实守护进程双向抓包 + 源码交叉确认。
+- Decision: 复用 acp-go-sdk 的 JSON-RPC envelope 与 Plan 展示类型；ask/exit 的 `_x.ai/*` 私有请求/应答为 Grok 私有形状，ACP 无对应模型，故只在 Grok adapter 内手写最小双向映射（入：`NormalizeInteractionRequest`；出：`DenormalizeInteractionResponse`）。中立 typed interaction 放 `internal/provider/interaction.go`，私有解析只放 `internal/provider/grok/interaction.go`。不新增依赖。
 - Boundary: 客户端只消费中立 `session/interaction_request`，绝不解析 `_x.ai/*` wrapper。Hub 复用 permission 的 session 定向 + first-answer-wins + 断连取消路径；交互失败一律回 JSON-RPC error（与 agent “重连后重现”行为一致），不回 permission 形状的 cancelled 结果。未知/畸形请求或应答 fail closed。
 - Boundary: 同一份数据在 grok wire 里有三种拼写（tool_call 用 `multi_select`，tool_call_update 与反向请求用 `multiSelect`）；适配器只认反向请求侧的 `multiSelect`，展示帧的 tool_call 由既有 session/update 透传，不复制第二份解析。

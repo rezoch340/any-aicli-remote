@@ -72,6 +72,7 @@ final class ChatOwnership {
     advanceSession()
     mountedSessionIdentity = nil
     resetTurnTracking()
+    store.interactionController.clear()
     store.sessions = []
     store.selectedSession = nil
     store.blocks = []

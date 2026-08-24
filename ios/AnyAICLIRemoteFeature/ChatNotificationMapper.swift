@@ -6,6 +6,7 @@ enum ChatNotification {
   case sessionsChanged
   case permission(PermissionRequest)
   case childAgent(ChildAgentCard)
+  case interaction(PendingInteraction)
 }
 
 struct PermissionRequest {
@@ -17,26 +18,58 @@ struct PermissionRequest {
 enum ChatNotificationMapper {
   static func map(payload: [String: Any], selectedSessionID: SessionIdentity?) -> ChatNotification? {
     let method = payload.string("method") ?? ""
+    if method == ACPWire.Method.interactionRequest {
+      return interactionNotification(payload: payload, selectedSessionID: selectedSessionID)
+    }
     if method == ACPWire.Method.childAgentUpdate {
-      guard let selectedSessionID,
-        let parameters = payload.object("params"),
-        ACPWire.matchesSessionIdentity(parameters, expected: selectedSessionID),
-        let event = parameters.object("event"),
-        let card = ChildAgentPayloadMapper.card(fromEvent: event)
-      else { return nil }
-      return .childAgent(card)
+      return childAgentNotification(payload: payload, selectedSessionID: selectedSessionID)
     }
     if method == ACPWire.Method.sessionUpdate {
-      guard let selectedSessionID else { return nil }
-      let parameters = payload.object("params") ?? [:]
-      guard ACPWire.matchesSessionIdentity(parameters, expected: selectedSessionID) else {
-        return nil
-      }
-      return .sessionUpdate(parameters.object("update") ?? parameters)
+      return sessionUpdateNotification(payload: payload, selectedSessionID: selectedSessionID)
     }
     if method == ACPWire.Method.sessionsChanged {
       return .sessionsChanged
     }
+    return permissionNotification(payload: payload, selectedSessionID: selectedSessionID)
+  }
+
+  private static func interactionNotification(
+    payload: [String: Any], selectedSessionID: SessionIdentity?
+  ) -> ChatNotification? {
+    guard let selectedSessionID,
+      let request = InteractionPayloadMapper.request(from: payload),
+      request.sessionIdentity == selectedSessionID
+    else { return nil }
+    return .interaction(request)
+  }
+
+  private static func childAgentNotification(
+    payload: [String: Any], selectedSessionID: SessionIdentity?
+  ) -> ChatNotification? {
+    guard let selectedSessionID,
+      let parameters = payload.object("params"),
+      ACPWire.matchesSessionIdentity(parameters, expected: selectedSessionID),
+      let event = parameters.object("event"),
+      let card = ChildAgentPayloadMapper.card(fromEvent: event)
+    else { return nil }
+    return .childAgent(card)
+  }
+
+  private static func sessionUpdateNotification(
+    payload: [String: Any], selectedSessionID: SessionIdentity?
+  ) -> ChatNotification? {
+    guard let selectedSessionID else { return nil }
+    let parameters = payload.object("params") ?? [:]
+    guard ACPWire.matchesSessionIdentity(parameters, expected: selectedSessionID) else {
+      return nil
+    }
+    return .sessionUpdate(parameters.object("update") ?? parameters)
+  }
+
+  private static func permissionNotification(
+    payload: [String: Any], selectedSessionID: SessionIdentity?
+  ) -> ChatNotification? {
+    let method = payload.string("method") ?? ""
     guard ACPWire.isPermissionRequest(method: method),
       let selectedSessionID,
       let rpcID = (payload["id"] as? NSNumber)?.intValue

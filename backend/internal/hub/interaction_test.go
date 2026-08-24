@@ -69,12 +69,17 @@ func TestInteractionAskRoundTrip(testInstance *testing.T) {
 
 	agent.send(testInstance, map[string]any{"jsonrpc": "2.0", "id": "ask-1", "method": "_x.ai/ask_user_question", "params": map[string]any{
 		"sessionId": "ask-session", "toolCallId": "call-4",
+		"questions": []any{map[string]any{"question": "缓存用 Redis 还是进程内 LRU？"}},
 	}})
 
 	request := readMethod(testInstance, client, providerapi.SessionInteractionRequestMethod)
 	params := rpcParams(testInstance, request)
-	if params["kind"] != string(providerapi.InteractionKindAskQuestion) {
+	if params["providerId"] != "test" || params["kind"] != string(providerapi.InteractionKindAskQuestion) {
 		testInstance.Fatalf("ask neutral params = %#v", params)
+	}
+	questions, valid := params["questions"].([]any)
+	if !valid || len(questions) != 1 || questions[0].(map[string]any)["question"] != "缓存用 Redis 还是进程内 LRU？" {
+		testInstance.Fatalf("ask questions = %#v", params["questions"])
 	}
 	clientIdentifier, _ := numericID(request["id"])
 
@@ -93,6 +98,10 @@ func TestInteractionAskRoundTrip(testInstance *testing.T) {
 	if _, isMap := result["answers"].(map[string]any); !isMap {
 		testInstance.Fatalf("answers not relayed as a map: %#v", result["answers"])
 	}
+	answers := result["answers"].(map[string]any)
+	if _, present := answers["缓存用 Redis 还是进程内 LRU？"]; !present {
+		testInstance.Fatalf("answers not keyed by original question: %#v", answers)
+	}
 }
 
 func TestInteractionMalformedAnswerFailsClosed(testInstance *testing.T) {
@@ -104,6 +113,7 @@ func TestInteractionMalformedAnswerFailsClosed(testInstance *testing.T) {
 
 	agent.send(testInstance, map[string]any{"jsonrpc": "2.0", "id": "ask-2", "method": "_x.ai/ask_user_question", "params": map[string]any{
 		"sessionId": "ask-session", "toolCallId": "call-9",
+		"questions": []any{map[string]any{"question": "选择方案？"}},
 	}})
 	request := readMethod(testInstance, client, providerapi.SessionInteractionRequestMethod)
 	clientIdentifier, _ := numericID(request["id"])

@@ -31,6 +31,7 @@ public final class ChatStore: ObservableObject {
   @Published var filePickerLoading = false
   @Published var filePickerError: String?
   @Published var isSessionLoading = false
+  @Published var pendingInteraction: PendingInteraction?
 
   let client: AnyAICLIRemoteClient
   private let runtimeConfiguration: ClientRuntimeConfiguration
@@ -39,6 +40,7 @@ public final class ChatStore: ObservableObject {
   private(set) var connectionCoordinator: ConnectionCoordinator!
   private(set) var sessionCoordinator: SessionCoordinator!
   private(set) var turnCoordinator: TurnCoordinator!
+  private(set) var interactionController: InteractionController!
 
   public init(
     healthProbe: DeviceHealthProbe? = nil,
@@ -56,6 +58,7 @@ public final class ChatStore: ObservableObject {
       deviceMessageIsError = true
     }
     ownership = ChatOwnership(store: self)
+    interactionController = InteractionController(store: self, ownership: ownership)
     deviceCoordinator = DeviceCoordinator(
       store: self, healthProbe: resolvedHealthProbe, deviceRepository: deviceRepository)
     connectionCoordinator = ConnectionCoordinator(store: self, ownership: ownership)
@@ -116,6 +119,10 @@ public final class ChatStore: ObservableObject {
   func send(_ text: String) { turnCoordinator.send(text) }
 
   func cancel() { turnCoordinator.cancel() }
+
+  func answerInteraction(_ interaction: PendingInteraction, answer: InteractionAnswer) {
+    interactionController.answer(interaction, answer: answer)
+  }
 
   func setEffort(_ effort: String) { turnCoordinator.setEffort(effort) }
 

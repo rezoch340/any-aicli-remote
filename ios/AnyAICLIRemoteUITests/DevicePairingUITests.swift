@@ -121,7 +121,7 @@ final class DevicePairingUITests: XCTestCase {
         let composer = application.descendants(matching: .any)["chat-composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         composer.tap()
-        composer.typeText("请不要调用工具。请连续输出至少八十行编号短句，每行内容不同，用于测试移动端流式吐字与自动滚动。最后单独输出 AUTOSCROLLENDMARKER。")
+        composer.typeText("不要调用工具。输出一段不超过十行的富文本，包含一个标题、一句粗体和三项列表；最后单独输出 RICHSHORTENDMARKER。")
         application.buttons["发送"].tap()
         XCTAssertTrue(application.staticTexts["等待助手"].waitForExistence(timeout: 10))
         XCTAssertTrue(application.buttons["停止生成"].waitForExistence(timeout: 5))
@@ -132,7 +132,7 @@ final class DevicePairingUITests: XCTestCase {
         let completedExpectation = XCTNSPredicateExpectation(predicate: completedPredicate, object: chatStatus)
         wait(for: [completedExpectation], timeout: 120)
         let markerPredicate = NSPredicate(
-            format: "identifier == %@ AND value CONTAINS %@", "assistant-message", "AUTOSCROLLENDMARKER"
+            format: "identifier == %@ AND value CONTAINS %@", "assistant-message", "RICHSHORTENDMARKER"
         )
         let markerText = application.descendants(matching: .any).matching(markerPredicate).firstMatch
         XCTAssertTrue(markerText.waitForExistence(timeout: 10))
@@ -208,6 +208,116 @@ final class DevicePairingUITests: XCTestCase {
         try require(composer.waitForExistence(timeout: 10), "历史会话输入框未出现")
         try awaitChildAgentCardCount(application: application, minimum: 2, timeout: 60)
         attachScreenshot(named: "child-agents-history")
+    }
+
+    func testStructuredAskInteractionAgainstLiveDaemon() throws {
+        guard ProcessInfo.processInfo.environment["ANY_AI_CLI_REMOTE_LIVE_UI_TEST"] == "1" else {
+            throw XCTSkip("Live daemon UI test is opt-in")
+        }
+
+        let application = try openNewLiveChat()
+        let composer = application.descendants(matching: .any)["chat-composer"]
+        composer.tap()
+        let askPrompt = "必须调用 ask_user_question，只问颜色，选项必须按“蓝色、绿色”的顺序提供。"
+            + "收到回答后，只有在既看到选择“蓝色”又看到 user notes 精确包含“移动端自定义答案”时，"
+            + "才只输出 ASKCUSTOMANSWEROK，否则输出不同失败标记。"
+        composer.typeText(askPrompt)
+        application.buttons["发送"].tap()
+
+        let askSheet = application.descendants(matching: .any)["interaction-ask-sheet"]
+        try require(askSheet.waitForExistence(timeout: 60), "未出现结构化提问面板")
+        try require(
+            application.descendants(matching: .any)["interaction-cancel"].exists,
+            "default ask 模式未找到取消按钮"
+        )
+        try require(
+            !application.descendants(matching: .any)["interaction-chat-about"].exists,
+            "default ask 模式不应显示先聊一下"
+        )
+        try require(
+            !application.descendants(matching: .any)["interaction-skip"].exists,
+            "default ask 模式不应显示跳过"
+        )
+        let question = application.descendants(matching: .any)["interaction-question-0"]
+        let blueOption = application.descendants(matching: .any)["interaction-option-0-0"]
+        let greenOption = application.descendants(matching: .any)["interaction-option-0-1"]
+        try require(question.exists, "未找到第一个问题")
+        try require(blueOption.exists, "未找到蓝色选项")
+        try require(greenOption.exists, "未找到绿色选项")
+        let customAnswer = application.descendants(matching: .any)["interaction-custom-answer-0"]
+        try typeAndAwaitValue(customAnswer, expected: "移动端自定义答案", fieldName: "自定义答案")
+        blueOption.tap()
+        try require(
+            waitForAccessibilityValue(blueOption, expected: "selected", timeout: 5),
+            "点击蓝色后选项未进入 selected 状态"
+        )
+        attachScreenshot(named: "ask-interaction-filled")
+        application.descendants(matching: .any)["interaction-submit"].tap()
+        try require(askSheet.waitForNonExistence(timeout: 10), "提交后结构化提问面板未关闭")
+        try awaitAssistantMarker(application: application, marker: "ASKCUSTOMANSWEROK", timeout: 120)
+    }
+
+    private func waitForAccessibilityValue(
+        _ element: XCUIElement,
+        expected: String,
+        timeout: TimeInterval
+    ) -> Bool {
+        let predicate = NSPredicate(format: "value == %@", expected)
+        return expect(element, matching: predicate, timeout: timeout)
+    }
+
+    func testPlanApprovalStartsAtTopAgainstLiveDaemon() throws {
+        guard ProcessInfo.processInfo.environment["ANY_AI_CLI_REMOTE_LIVE_UI_TEST"] == "1" else {
+            throw XCTSkip("Live daemon UI test is opt-in")
+        }
+
+        let application = try openNewLiveChat()
+        let composer = application.descendants(matching: .any)["chat-composer"]
+        composer.tap()
+        composer.typeText("必须先调用 enter_plan_mode，生成至少30行编号的只读计划，然后调用 exit_plan_mode。收到修改意见后，第二版必须包含唯一文本 PLANREVISIONTWO 并再次 exit_plan_mode；不要实施计划。")
+        application.buttons["发送"].tap()
+
+        let planSheet = application.descendants(matching: .any)["interaction-plan-sheet"]
+        try require(planSheet.waitForExistence(timeout: 90), "未出现计划批准面板")
+        let planTitle = application.staticTexts["计划待批准"]
+        let planContent = application.descendants(matching: .any)["interaction-plan-content"]
+        try require(planTitle.exists, "未找到计划标题")
+        try require(planContent.exists, "未找到计划内容")
+        assertPlanStartsAtTop(application: application, title: planTitle, content: planContent)
+        attachScreenshot(named: "plan-interaction-first-version")
+
+        let feedback = application.descendants(matching: .any)["interaction-plan-feedback"]
+        try typeAndAwaitValue(feedback, expected: "第二版必须包含 PLANREVISIONTWO", fieldName: "计划修改意见")
+        application.descendants(matching: .any)["interaction-plan-revise"].tap()
+        try awaitInteractionMarker(
+            application: application,
+            identifier: "interaction-plan-content",
+            marker: "PLANREVISIONTWO",
+            timeout: 120
+        )
+        assertPlanStartsAtTop(application: application, title: planTitle, content: planContent)
+        attachScreenshot(named: "plan-interaction-second-version")
+        application.descendants(matching: .any)["interaction-plan-abandon"].tap()
+        try require(planSheet.waitForNonExistence(timeout: 10), "放弃后计划批准面板未关闭")
+    }
+
+    private func openNewLiveChat() throws -> XCUIApplication {
+        let application = launchApplication()
+        try addDevice(
+            application: application,
+            name: "模拟器服务",
+            address: "http://127.0.0.1:2421",
+            pairingKeyInput: .file(path: try livePairingKeyFilePath())
+        )
+        let deviceRow = deviceButton(application: application, name: "模拟器服务")
+        try require(deviceRow.waitForExistence(timeout: 10), "未找到模拟器服务")
+        deviceRow.tap()
+        try require(application.navigationBars["模拟器服务"].waitForExistence(timeout: 10), "未进入设备")
+        application.buttons["新建会话"].tap()
+        try require(application.navigationBars["新建会话"].waitForExistence(timeout: 5), "新建会话页未出现")
+        application.buttons["创建"].tap()
+        try require(application.descendants(matching: .any)["chat-composer"].waitForExistence(timeout: 10), "聊天输入框未出现")
+        return application
     }
 
     private func livePairingKeyFilePath() throws -> String {
@@ -286,10 +396,28 @@ final class DevicePairingUITests: XCTestCase {
     private func dismissPasswordAutofillPromptIfPresent(application: XCUIApplication) throws {
         let localizedButton = application.buttons["以后"]
         let englishButton = application.buttons["Not Now"]
-        if localizedButton.waitForExistence(timeout: 2), localizedButton.isHittable {
-            localizedButton.tap()
-        } else if englishButton.waitForExistence(timeout: 2), englishButton.isHittable {
-            englishButton.tap()
+        let deadline = Date().addingTimeInterval(5)
+        var tappedPrompt = false
+        while Date() < deadline {
+            let candidate: XCUIElement?
+            if localizedButton.exists && localizedButton.isHittable {
+                candidate = localizedButton
+            } else if englishButton.exists && englishButton.isHittable {
+                candidate = englishButton
+            } else {
+                candidate = nil
+            }
+            if let candidate {
+                tappedPrompt = true
+                candidate.tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+                if !localizedButton.exists && !englishButton.exists { return }
+            } else {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            }
+        }
+        if tappedPrompt && (localizedButton.exists || englishButton.exists) {
+            throw UIFlowError.message("保存密码提示未消失")
         }
     }
 
@@ -359,6 +487,47 @@ final class DevicePairingUITests: XCTestCase {
     private func expect(_ element: XCUIElement, matching predicate: NSPredicate, timeout: TimeInterval) -> Bool {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func awaitAssistantMarker(
+        application: XCUIApplication,
+        marker: String,
+        timeout: TimeInterval
+    ) throws {
+        try awaitInteractionMarker(
+            application: application,
+            identifier: "assistant-message",
+            marker: marker,
+            timeout: timeout
+        )
+    }
+
+    private func awaitInteractionMarker(
+        application: XCUIApplication,
+        identifier: String,
+        marker: String,
+        timeout: TimeInterval
+    ) throws {
+        let predicate = NSPredicate(
+            format: "identifier == %@ AND (label CONTAINS %@ OR value CONTAINS %@)",
+            identifier,
+            marker,
+            marker
+        )
+        let element = application.descendants(matching: .any).matching(predicate).firstMatch
+        try require(element.waitForExistence(timeout: timeout), "未找到标记 \(marker)")
+    }
+
+    private func assertPlanStartsAtTop(
+        application: XCUIApplication,
+        title: XCUIElement,
+        content: XCUIElement
+    ) {
+        let window = application.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let topBoundary = window.frame.minY + window.frame.height * 0.45
+        XCTAssertLessThan(title.frame.minY, topBoundary)
+        XCTAssertLessThan(content.frame.minY, topBoundary)
     }
 
     private func require(_ condition: Bool, _ message: String) throws {

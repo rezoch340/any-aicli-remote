@@ -132,7 +132,7 @@ func (hubInstance *Hub) handleClientMessage(client *clientConnection, raw []byte
 		if !known || !allowed {
 			return
 		}
-		if route.interactionKind != "" {
+		if route.interactionRequest.Kind != "" {
 			hubInstance.relayInteractionAnswer(object, route, client, identifier)
 			return
 		}
@@ -200,7 +200,7 @@ func (hubInstance *Hub) relayInteractionAnswer(object map[string]any, route reve
 		hubInstance.sendRPCError(client, clientIdentifier, decodeError.Error(), methodNotCallableErrorCode)
 		return
 	}
-	providerResult, denormalizeError := hubInstance.protocol.DenormalizeInteractionResponse(route.interactionKind, response)
+	providerResult, denormalizeError := hubInstance.protocol.DenormalizeInteractionResponse(route.interactionRequest, response)
 	if denormalizeError != nil {
 		hubInstance.replyInteractionUnavailable(route.identifier, "invalid interaction answer", route.agentGeneration)
 		hubInstance.sendRPCError(client, clientIdentifier, denormalizeError.Error(), methodNotCallableErrorCode)

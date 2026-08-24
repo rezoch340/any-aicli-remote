@@ -38,6 +38,7 @@ final class SessionCoordinator {
     if requiresSessionLoad { ownership.mountedSessionIdentity = nil }
     let generation = ownership.advanceSession()
     ownership.resetTurnTracking()
+    store.interactionController.clear()
     store.selectedSession = session
     store.blocks = []
     store.childAgents = []
@@ -59,6 +60,7 @@ final class SessionCoordinator {
     store.isSessionLoading = false
     ownership.advanceSession()
     ownership.resetTurnTracking()
+    store.interactionController.clear()
     store.selectedSession = nil
     store.blocks = []
     store.childAgents = []
@@ -91,6 +93,7 @@ final class SessionCoordinator {
       ownership.sessionLoadTask = nil
       store.isSessionLoading = false
       ownership.resetTurnTracking()
+      store.interactionController.clear()
       store.selectedSession = nil
       store.childAgents = []
       ownership.advanceSession()

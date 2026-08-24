@@ -125,6 +125,12 @@ struct ChatView: View {
                 WorkspaceFilePickerView().environmentObject(store)
             }
         )
+        .sheet(item: $store.pendingInteraction) { interaction in
+            InteractionSheet(
+                interaction: interaction,
+                onAnswer: { store.answerInteraction(interaction, answer: $0) }
+            )
+        }
     }
 }
 

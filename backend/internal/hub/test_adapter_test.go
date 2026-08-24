@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -179,16 +180,32 @@ func (providerInstance *testProvider) NormalizeInteractionRequest(method string,
 		request.PlanContent = stringValue(params["planContent"])
 		return request, true
 	case "_x.ai/ask_user_question":
+		rawQuestions, valid := params["questions"].([]any)
+		if !valid || len(rawQuestions) == 0 {
+			return providerapi.InteractionRequest{}, false
+		}
+		questions := make([]providerapi.InteractionQuestion, 0, len(rawQuestions))
+		for _, rawQuestion := range rawQuestions {
+			questionParams, valid := rawQuestion.(map[string]any)
+			if !valid {
+				return providerapi.InteractionRequest{}, false
+			}
+			question := strings.TrimSpace(stringValue(questionParams["question"]))
+			if question == "" {
+				return providerapi.InteractionRequest{}, false
+			}
+			questions = append(questions, providerapi.InteractionQuestion{Question: question})
+		}
 		request.Kind = providerapi.InteractionKindAskQuestion
-		request.Questions = []providerapi.InteractionQuestion{{Question: "pick", Options: []providerapi.InteractionOption{{Label: "a"}}}}
+		request.Questions = questions
 		return request, true
 	default:
 		return providerapi.InteractionRequest{}, false
 	}
 }
 
-func (providerInstance *testProvider) DenormalizeInteractionResponse(kind providerapi.InteractionKind, response providerapi.InteractionResponse) (map[string]any, error) {
-	if kind == providerapi.InteractionKindExitPlan {
+func (providerInstance *testProvider) DenormalizeInteractionResponse(request providerapi.InteractionRequest, response providerapi.InteractionResponse) (map[string]any, error) {
+	if request.Kind == providerapi.InteractionKindExitPlan {
 		if response.Outcome != providerapi.InteractionOutcomeApproved && response.Outcome != providerapi.InteractionOutcomeCancelled && response.Outcome != providerapi.InteractionOutcomeAbandoned {
 			return nil, errors.New("invalid exit-plan outcome")
 		}
@@ -200,7 +217,15 @@ func (providerInstance *testProvider) DenormalizeInteractionResponse(kind provid
 	if len(response.Answers) == 0 {
 		return nil, errors.New("empty answers")
 	}
-	return map[string]any{"outcome": "accepted", "answers": response.Answers}, nil
+	answers := make(map[string]any, len(response.Answers))
+	for key, selections := range response.Answers {
+		index, parseError := strconv.ParseUint(key, 10, 64)
+		if parseError != nil || index >= uint64(len(request.Questions)) {
+			return nil, errors.New("invalid question index")
+		}
+		answers[request.Questions[int(index)].Question] = selections
+	}
+	return map[string]any{"outcome": "accepted", "answers": answers}, nil
 }
 
 func (providerInstance *testProvider) DaemonNotification(kind providerapi.NotificationKind, params map[string]any) (string, map[string]any) {

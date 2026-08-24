@@ -60,6 +60,7 @@ final class TurnCoordinator {
   }
 
   func cancel() {
+    store.interactionController.clear()
     guard let session = store.selectedSession,
       let context = ownership.currentSessionContext(sessionIdentity: session.id)
     else { return }
@@ -143,6 +144,8 @@ final class TurnCoordinator {
           options: options
         )
       )
+    case .interaction(let request):
+      store.interactionController.receive(request)
     }
   }
 

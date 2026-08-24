@@ -21,10 +21,10 @@ type reverseRequestRoute struct {
 	agentGeneration uint64
 	clients         map[*clientConnection]struct{}
 	permission      bool
-	// interactionKind is set when the route is a structured interaction, so the
+	// interactionRequest is set when the route is a structured interaction, so the
 	// client's neutral answer can be denormalized back to the provider shape
 	// before it is relayed to the agent.
-	interactionKind providerapi.InteractionKind
+	interactionRequest providerapi.InteractionRequest
 }
 
 func (hubInstance *Hub) handleReverseAsync(
@@ -45,7 +45,7 @@ func (hubInstance *Hub) handleReverseAsync(
 		return false
 	}
 	if reverseRequest.Operation == providerapi.PermissionOperation {
-		hubInstance.forwardReverseRequest(object, reverseRequest.SessionID, true, "", agentGeneration)
+		hubInstance.forwardReverseRequest(object, reverseRequest.SessionID, true, providerapi.InteractionRequest{}, agentGeneration)
 		return true
 	}
 	if reverseRequest.Operation == providerapi.InteractionOperation {
@@ -57,7 +57,7 @@ func (hubInstance *Hub) handleReverseAsync(
 		}
 		object["method"] = providerapi.SessionInteractionRequestMethod
 		object["params"] = interactionRequestParams(interaction)
-		hubInstance.forwardReverseRequest(object, interaction.SessionID, true, interaction.Kind, agentGeneration)
+		hubInstance.forwardReverseRequest(object, interaction.SessionID, true, interaction, agentGeneration)
 		return true
 	}
 	hubInstance.stateMutex.Lock()
@@ -147,7 +147,7 @@ func (hubInstance *Hub) handleReverse(
 	}
 }
 
-func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID string, permission bool, interactionKind providerapi.InteractionKind, agentGeneration uint64) {
+func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID string, permission bool, interactionRequest providerapi.InteractionRequest, agentGeneration uint64) {
 	identifier, present := object["id"]
 	if !present {
 		return
@@ -184,7 +184,7 @@ func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID s
 	}
 	if len(targetClients) == 0 {
 		hubInstance.stateMutex.Unlock()
-		if interactionKind != "" {
+		if interactionRequest.Kind != "" {
 			hubInstance.replyInteractionUnavailable(identifier, "no matching remote client", agentGeneration)
 		} else {
 			hubInstance.replyReverseUnavailable(identifier, permission, "no matching remote client", agentGeneration)
@@ -195,7 +195,7 @@ func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID s
 	object["id"] = clientIdentifier
 	routeKey := idKey(clientIdentifier)
 	hubInstance.reverseRequests[routeKey] = reverseRequestRoute{
-		identifier: identifier, agentGeneration: agentGeneration, clients: targetClients, permission: permission, interactionKind: interactionKind,
+		identifier: identifier, agentGeneration: agentGeneration, clients: targetClients, permission: permission, interactionRequest: interactionRequest,
 	}
 	hubInstance.stateMutex.Unlock()
 

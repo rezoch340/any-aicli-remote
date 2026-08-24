@@ -94,6 +94,6 @@ type ProtocolAdapter interface {
 	// into the neutral typed form. It is called only for InteractionOperation.
 	NormalizeInteractionRequest(method string, params map[string]any) (InteractionRequest, bool)
 	// DenormalizeInteractionResponse converts a neutral interaction answer back
-	// into the provider result payload for the given interaction kind.
-	DenormalizeInteractionResponse(kind InteractionKind, response InteractionResponse) (map[string]any, error)
+	// into the provider result payload using the original interaction request.
+	DenormalizeInteractionResponse(request InteractionRequest, response InteractionResponse) (map[string]any, error)
 }

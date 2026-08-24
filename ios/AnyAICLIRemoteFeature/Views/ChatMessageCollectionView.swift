@@ -71,6 +71,8 @@ struct ChatMessageCollectionView: UIViewRepresentable {
         private var identity: SessionIdentity
         private var sessionGeneration = 0
         private var renderedBlockIDs = Set<String>()
+        private var pendingModelUpdates: [String: (block: ChatBlock, isStreaming: Bool)] = [:]
+        private var pendingModelFlush = false
         private var initialRevealPending = false
         private var initialRevealStartedAt: CFTimeInterval?
         private var initialRevealStableSince: CFTimeInterval?
@@ -155,14 +157,19 @@ struct ChatMessageCollectionView: UIViewRepresentable {
                 displayedIDs = []
                 collection.alpha = 0
                 models.removeAll()
+                pendingModelUpdates.removeAll()
+                pendingModelFlush = false
             }
             if owner.streamingAssistantID != nil && !didAppear {
                 revealStreamingContent(in: collection)
             }
             var modelChanged = false
             for block in owner.blocks {
-                if let model = models[block.id] {
-                    modelChanged = model.update(block: block, isStreaming: block.id == owner.streamingAssistantID) || modelChanged
+                if models[block.id] != nil {
+                    let isStreaming = block.id == owner.streamingAssistantID
+                    pendingModelUpdates[block.id] = (block: block, isStreaming: isStreaming)
+                    scheduleModelFlush()
+                    modelChanged = true
                 } else {
                     models[block.id] = CellModel(block: block, isStreaming: block.id == owner.streamingAssistantID, permission: owner.onPermissionAnswer)
                     modelChanged = true
@@ -170,6 +177,7 @@ struct ChatMessageCollectionView: UIViewRepresentable {
             }
             let retainedBlockIDs = Set(owner.blocks.map(\.id))
             models = models.filter { retainedBlockIDs.contains($0.key) }
+            pendingModelUpdates = pendingModelUpdates.filter { retainedBlockIDs.contains($0.key) }
             let blockIDs = owner.blocks.map(\.id)
             if blockIDs != displayedIDs {
                 displayedIDs = blockIDs
@@ -196,11 +204,31 @@ struct ChatMessageCollectionView: UIViewRepresentable {
             }
             if owner.scrollRequestRevision != lastRevision {
                 lastRevision = owner.scrollRequestRevision
-                owner.isFollowing = true
                 pinToBottom()
             }
             if lastBusy && !owner.isBusy { needsFinalFlush = true; requestLayout() }
             lastBusy = owner.isBusy
+        }
+
+        private func scheduleModelFlush() {
+            guard !pendingModelFlush else { return }
+            pendingModelFlush = true
+            let flushGeneration = sessionGeneration
+            let flushIdentity = identity
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.pendingModelFlush = false
+                guard self.sessionGeneration == flushGeneration, self.identity == flushIdentity else { return }
+                let activeIDs = Set(self.owner.blocks.map(\.id))
+                let updates = self.pendingModelUpdates
+                self.pendingModelUpdates.removeAll()
+                var changed = false
+                for (blockID, update) in updates where activeIDs.contains(blockID) {
+                    guard let model = self.models[blockID] else { continue }
+                    changed = model.update(block: update.block, isStreaming: update.isStreaming) || changed
+                }
+                if changed { self.requestLayout() }
+            }
         }
 
         private func revealStreamingContent(in collection: UICollectionView) {
@@ -238,6 +266,9 @@ struct ChatMessageCollectionView: UIViewRepresentable {
             var initialRevealDeferred = false
             UIView.performWithoutAnimation {
                 collection.layoutIfNeeded()
+                if alignShortContentToBottom(collection) {
+                    collection.layoutIfNeeded()
+                }
                 guard self.initialRevealPending else { return }
                 guard collection.numberOfSections > 0 else {
                     initialRevealDeferred = true
@@ -258,6 +289,21 @@ struct ChatMessageCollectionView: UIViewRepresentable {
                 return
             }
             performPendingUpdate()
+        }
+
+        /// Adds only the inset needed to make short transcripts end at the viewport bottom.
+        /// The system top inset is excluded so safe-area and container changes remain correct.
+        private func alignShortContentToBottom(_ collection: UICollectionView) -> Bool {
+            let systemTopInset = collection.adjustedContentInset.top - collection.contentInset.top
+            let availableHeight = collection.bounds.height - systemTopInset - collection.adjustedContentInset.bottom
+            let targetTopInset = max(0, availableHeight - collection.collectionViewLayout.collectionViewContentSize.height)
+            guard abs(collection.contentInset.top - targetTopInset) > Metrics.insetChangeTolerance else {
+                return false
+            }
+            var contentInset = collection.contentInset
+            contentInset.top = targetTopInset
+            collection.contentInset = contentInset
+            return true
         }
 
         private func updateFollowingScrollPosition(startingOffset: CGPoint) {
@@ -367,6 +413,8 @@ struct ChatMessageCollectionView: UIViewRepresentable {
             sessionLoadClampDeadline = nil
             contentObservation?.invalidate()
             contentObservation = nil
+            pendingModelUpdates.removeAll()
+            pendingModelFlush = false
         }
         deinit {
             displayLink?.invalidate()
@@ -403,6 +451,7 @@ private enum Metrics {
     static let bottomTolerance: CGFloat = 18
     static let streamingAnimationDuration: TimeInterval = 0.20
     static let streamingOffsetThreshold: CGFloat = 1
+    static let insetChangeTolerance: CGFloat = 0.5
     static let initialRevealStableDuration: CFTimeInterval = 0.30
     static let initialRevealMaximumDuration: CFTimeInterval = 2.0
     static let sessionLoadClampDuration: CFTimeInterval = 8.0

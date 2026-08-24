@@ -1,6 +1,5 @@
 import AnyAICLIRemoteCore
 import SwiftUI
-import SwiftStreamingMarkdown
 
 struct ChatBlockView: View {
     let block: ChatBlock
@@ -218,92 +217,5 @@ private struct SystemBlock: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 5)
             .padding(.horizontal, 16)
-    }
-}
-
-private struct MarkdownText: View {
-    let text: String
-    let isStreaming: Bool
-    let onRender: () -> Void
-    @StateObject private var streamingSource: LiveMarkdownSource
-    @StateObject private var renderListener: RenderCompleteListener
-
-    init(_ text: String, isStreaming: Bool, onRender: @escaping () -> Void = {}) {
-        self.text = text
-        self.isStreaming = isStreaming
-        self.onRender = onRender
-        _streamingSource = StateObject(wrappedValue: LiveMarkdownSource(initialText: text))
-        _renderListener = StateObject(wrappedValue: RenderCompleteListener(onRender: onRender))
-    }
-
-    var body: some View {
-        Group {
-            if isStreaming {
-                StreamedMarkdownView(source: streamingSource, listener: isStreaming ? renderListener : nil)
-            } else {
-                MarkdownView(text: text, listener: renderListener)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear {
-            streamingSource.update(text)
-        }
-        .onChange(of: text) { _, updatedText in
-            streamingSource.update(updatedText)
-        }
-    }
-}
-
-@MainActor
-private final class RenderCompleteListener: NSObject, ObservableObject, MarkdownListener {
-    private let onRenderComplete: () -> Void
-    private var renderPending = false
-
-    init(onRender: @escaping () -> Void) {
-        onRenderComplete = onRender
-    }
-
-    func onRender(markdown: RenderableDocument) async {
-        guard !renderPending else { return }
-        renderPending = true
-        DispatchQueue.main.async {
-            self.renderPending = false
-            self.onRenderComplete()
-        }
-    }
-
-    func onTableCopyTap(content: String) async {}
-    func onTableDownloadTap(content: String) async {}
-    func onContextMenuAppear(id: String, selectedContent: String) async {}
-    func onContextMenuTap(id: String, selectedContent: String) async {}
-    func onImageTap(image: MarkdownImage) async {}
-}
-
-private final class LiveMarkdownSource: ObservableObject, StreamedMarkdownSource {
-    let text: AsyncStream<String>
-    private let continuation: AsyncStream<String>.Continuation
-    private var lastText: String
-
-    init(initialText: String) {
-        var capturedContinuation: AsyncStream<String>.Continuation?
-        text = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { streamContinuation in
-            capturedContinuation = streamContinuation
-        }
-        guard let capturedContinuation else {
-            preconditionFailure("Unable to create Markdown stream")
-        }
-        continuation = capturedContinuation
-        lastText = initialText
-        continuation.yield(initialText)
-    }
-
-    func update(_ updatedText: String) {
-        guard updatedText != lastText else { return }
-        lastText = updatedText
-        continuation.yield(updatedText)
-    }
-
-    deinit {
-        continuation.finish()
     }
 }

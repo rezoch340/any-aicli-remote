@@ -65,7 +65,7 @@ func (hubInstance *Hub) handleAgentMessage(raw []byte, agentGeneration uint64, a
 			return
 		}
 		reverseParams, _ := object["params"].(map[string]any)
-		hubInstance.forwardReverseRequest(object, stringValue(reverseParams["sessionId"]), false, "", agentGeneration)
+		hubInstance.forwardReverseRequest(object, stringValue(reverseParams["sessionId"]), false, providerapi.InteractionRequest{}, agentGeneration)
 		return
 	}
 	if !hasID && method != "" && hubInstance.protocol != nil {

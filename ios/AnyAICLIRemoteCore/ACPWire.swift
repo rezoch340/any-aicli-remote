@@ -9,6 +9,7 @@ public enum ACPWire {
     public static let sessionUpdate = "session/update"
     public static let childAgentUpdate = "session/child_agent_update"
     public static let sessionsChanged = "sessions/changed"
+    public static let interactionRequest = "session/interaction_request"
   }
 
   public static func promptParameters(sessionID: String, text: String, attachments: [WorkspaceFile])
@@ -43,7 +44,7 @@ public enum ACPWire {
   }
 
   public static func isPermissionRequest(method: String) -> Bool {
-    method.contains("permission") || method.contains("ask_user")
+    method == "permission/request"
   }
 
   public static func permissionReplyResult(optionID: String?) -> [String: Any] {

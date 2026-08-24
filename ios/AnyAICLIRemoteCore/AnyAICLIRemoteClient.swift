@@ -237,8 +237,9 @@ public final class AnyAICLIRemoteClient {
           continue
         }
         if let method = object["method"] as? String,
-          Self.incomingRequestCategory(object) == .unknown {
-          let error = Self.methodNotFoundResponse(id: object["id"]!, method: method)
+          Self.incomingRequestCategory(object) == .unknown,
+          let requestID = object["id"] {
+          let error = Self.methodNotFoundResponse(id: requestID, method: method)
           try await send(error, socket: socket, connectionID: connectionID)
           continue
         }
@@ -257,10 +258,11 @@ public final class AnyAICLIRemoteClient {
     }
   }
 
-  enum IncomingRequestCategory: Equatable { case permission, unknown, notification }
+  enum IncomingRequestCategory: Equatable { case permission, interaction, unknown, notification }
 
   nonisolated static func incomingRequestCategory(_ method: String) -> IncomingRequestCategory {
-    if method.contains("permission") || method.contains("ask_user") { return .permission }
+    if method == ACPWire.Method.interactionRequest { return .interaction }
+    if ACPWire.isPermissionRequest(method: method) { return .permission }
     return .unknown
   }
 
