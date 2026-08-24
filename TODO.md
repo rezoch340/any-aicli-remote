@@ -52,10 +52,12 @@ then include the checkbox update in that feature's commit.
   - Commit: `✨ 聊天：新增子 Agent 实时状态卡片`
 
 - [ ] **6. 结构化交互合同（ask / exit plan）**
-  - [ ] Grok adapter 解开 provider 私有 wire 并校验，映射成 provider-neutral typed interaction。复用仓库已有 `coder/acp-go-sdk` 的 `Plan`/`PlanEntry`/`UpdatePlan` 与 `UnstableCreateElicitation*` 类型；仅对 ACP 未覆盖的差异写最小适配，并在 `docs/DEPENDENCY_DECISIONS.md` 逐条记录：ACP 用 JSON Schema 而 Grok 用 questions/options、`mode` 同名不同义（form|url 对 default|plan）、`chat_about_this` 与 `skip_interview` 在 ACP 无对应结局、elicitation 类型带 `Unstable` 前缀。
-  - [ ] 修正 `internal/provider/grok/protocol.go` 中 `ask_user` 子串匹配：wrapped ask/exit 现在会被误判为权限请求，外层 params 取不到 `sessionId` 而可能直接取消。分类必须精确匹配并先于权限判别。
-  - [ ] 中立契约放 `internal/provider`，provider 私有解析只放 `internal/provider/grok`；Hub 只做 session-scoped first-answer-wins、断连/超时取消与代际校验，unknown 或畸形负载 fail closed。
-  - [ ] Android 先、iOS 后：实现 pending 交互 UI、ask 表单与 plan 预览/操作；客户端只消费中立 payload，不解析 provider wrapper。验证 `interaction_resolved` 会关闭其他设备上的待处理 UI。
+  - 实测事实（grok 1.0.5 本机抓取，见记忆 grok-ask-exit-wire）：ask/exit **不是** ACP 反向请求，而是 `session/update` 流里的 `tool_call`，判别式为 `_meta["x.ai/tool"].kind`（`ask_user` / `exit_plan`）。与子 Agent 走同一条 `NormalizeAgentNotification` 归一化管线。
+  - [ ] 在 Grok adapter 的 `session/update` 归一化里按 `x.ai/tool.kind` 认出 ask/exit，映射成 provider-neutral typed interaction。`ask_user` 的 `rawInput.questions[{question, options[{label,description}], multi_select}]` 归一为中立 typed 问题；`tool_call` 用 `multi_select`（下划线）而 `tool_call_update` 用 `multiSelect`（驼峰），两处都要认。`plan` 是独立 `sessionUpdate:"plan"`，已是 ACP 形状 `entries[{content,priority,status}]`，直接复用 `coder/acp-go-sdk` 的 `Plan`/`PlanEntry`。exit_plan 的 `rawInput` 为空，计划正文在会话目录 `plan.md`。
+  - [ ] 在 `docs/DEPENDENCY_DECISIONS.md` 记录：复用 acp-go-sdk 的 `Plan`/`PlanEntry`；ask 的 questions/options 是 Grok 私有形状（ACP 的 elicitation 走 JSON Schema 且 agent 不通告该能力，故不套用其类型）；`chat_about_this`/`skip_interview` 等结局在 ACP 无对应物需自定义中立枚举。
+  - [ ] 清理 `internal/provider/grok/protocol.go` 中 `ClassifyReverseRequest` 的 `ask_user` 子串匹配——ask 从不走反向通道，该分支是死代码，删除以免误导；权限分类改为精确匹配。
+  - [ ] 中立契约放 `internal/provider`，provider 私有解析只放 `internal/provider/grok`；Hub 只做 session-scoped first-answer-wins、断连/超时取消与代际校验，unknown 或畸形负载 fail closed。协议测试覆盖 ask/exit 识别、字段归一、两种拼写、未知 kind fail closed、结局回传。
+  - [ ] Android 先、iOS 后：实现 pending 交互 UI、ask 表单与 plan 预览/操作；客户端只消费中立 payload，不解析 provider wrapper。
   - Commit: `✨ 聊天：新增结构化交互与计划确认`
 
 - [ ] **7. 最终发布**
