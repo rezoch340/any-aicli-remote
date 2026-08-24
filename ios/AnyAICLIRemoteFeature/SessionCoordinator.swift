@@ -135,6 +135,10 @@ final class SessionCoordinator {
       store.statusMessage = "在线"
       return
     }
+    // 挂载期间 provider 会把整轮对话作为 session/update 重放。上面刚落地的历史快照
+    // 已经是权威内容，这里屏蔽重放，避免消息、思考与回复各被追加一遍。
+    ownership.isMountingSession = true
+    defer { ownership.isMountingSession = false }
     do {
       let response = try await store.client.rpc(
         ACPWire.Method.sessionLoad,

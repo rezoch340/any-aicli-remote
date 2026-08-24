@@ -11,6 +11,8 @@ final class ChatOwnership {
   private(set) var connectionGeneration = UUID()
   private(set) var sessionGeneration = UUID()
   var sessionLoadTask: Task<Void, Never>?
+  /// 为 true 时表示正在向 provider 挂载会话，其间收到的 session/update 是历史重放。
+  var isMountingSession = false
   var mountedSessionIdentity: SessionIdentity?
 
   init(store: ChatStore) {

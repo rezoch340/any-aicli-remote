@@ -88,7 +88,14 @@ internal class SessionCoordinator(
             isCurrent = { scope.isSessionCurrent(operationToken, deviceId, session.identity) },
             onFailure = { scope.updateStatus("挂载失败：${it.message}") },
         ) {
-            val model = sessionController.mount(session, scope.state.model)
+            // 挂载期间 provider 会把整轮对话作为 session/update 重放。上面刚落地的历史
+            // 已是权威内容，屏蔽重放，避免消息、思考与回复各被追加一遍。
+            scope.isMountingSession = true
+            val model = try {
+                sessionController.mount(session, scope.state.model)
+            } finally {
+                scope.isMountingSession = false
+            }
             if (scope.isSessionCurrent(operationToken, deviceId, session.identity)) {
                 scope.update { it.copy(model = model, status = "在线") }
             }

@@ -4,6 +4,7 @@ import com.anyaicliremote.core.model.ChatBlock
 import com.anyaicliremote.core.model.ConnectionStatus
 import com.anyaicliremote.core.model.SessionSummary
 import com.anyaicliremote.core.model.ToolRunState
+import com.anyaicliremote.core.remote.ACPEvent
 import com.anyaicliremote.core.remote.ACPEventDecoder
 import com.anyaicliremote.core.session.SessionController
 import kotlinx.coroutines.CoroutineScope
@@ -88,6 +89,9 @@ internal class TurnCoordinator(
 
     fun handleNotification(message: JsonObject) {
         val event = ACPEventDecoder.decode(message) ?: return
+        // 挂载期间 provider 会重放整轮对话，历史快照已经包含这些内容；只丢弃重放的
+        // session/update，权限请求等仍需照常处理。
+        if (scope.isMountingSession && event is ACPEvent.SessionUpdate) return
         val reduction = chatEventReducer.reduceNotification(scope.state, event)
         scope.replace(reduction.state)
         if (reduction.action == ChatEventAction.RefreshSessions) sessions.refreshSessions()

@@ -23,6 +23,9 @@ internal class ChatOperationScope(
     var promptJob: Job? = null
     var effortJob: Job? = null
 
+    /** 为 true 时表示正在向 provider 挂载会话，其间收到的 session/update 是历史重放。 */
+    var isMountingSession = false
+
     val state: ChatUiState get() = stateFlow.value
 
     fun update(transform: (ChatUiState) -> ChatUiState) = stateFlow.update(transform)

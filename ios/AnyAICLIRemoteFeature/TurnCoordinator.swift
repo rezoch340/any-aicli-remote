@@ -122,6 +122,9 @@ final class TurnCoordinator {
 
     switch notification {
     case .sessionUpdate(let update):
+      // session/load 会把整轮对话重放一遍。历史快照已经包含这些内容，再追加就会让
+      // 用户消息、思考与回复各出现两次，且重启后回显去重表是空的，拦不住重放。
+      guard !ownership.isMountingSession else { return }
       applyTranscriptUpdate(update)
     case .sessionsChanged:
       guard let context = ownership.currentConnectionContext() else { return }
