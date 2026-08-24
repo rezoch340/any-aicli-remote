@@ -28,11 +28,7 @@ import com.anyaicliremote.feature.ui.ChatUiState
 @Composable
 internal fun ChatEffects(effectState: ChatEffectsState) {
     FollowNewMessages(
-        newestBlock = effectState.state.blocks.lastOrNull(),
-        sessionId = effectState.sessionId,
-        listState = effectState.listState,
-        hasRows = effectState.hasRows,
-        setFollow = effectState.setFollow,
+        effectState = effectState,
     )
     FollowStreamCompletion(
         busy = effectState.state.busy,
@@ -50,20 +46,42 @@ internal fun ChatEffects(effectState: ChatEffectsState) {
 
 @Composable
 private fun FollowNewMessages(
-    newestBlock: ChatBlock?,
-    sessionId: String,
-    listState: LazyListState,
-    hasRows: Boolean,
-    setFollow: (Boolean) -> Unit,
+    effectState: ChatEffectsState,
 ) {
-    val latestRows by rememberUpdatedState(hasRows)
-    LaunchedEffect(sessionId, newestBlock?.id) {
+    val newestBlock = effectState.state.blocks.lastOrNull()
+    val latestRows by rememberUpdatedState(effectState.hasRows)
+    val latestFollow by rememberUpdatedState(effectState.follow)
+    LaunchedEffect(
+        effectState.sessionId,
+        newestBlock?.id,
+        newestBlock?.kind,
+        newestBlock?.text,
+        newestBlock?.detail,
+        newestBlock?.title,
+        newestBlock?.toolState,
+    ) {
         if (newestBlock?.kind == ChatBlockKind.USER) {
-            setFollow(true)
-            if (latestRows) listState.scrollToItem(0)
+            effectState.setFollow(true)
+            if (latestRows) effectState.listState.scrollToItem(0)
+        } else if (shouldFollowLiveBlock(newestBlock, latestRows, latestFollow, effectState.listState)) {
+            effectState.listState.scrollToItem(0)
         }
     }
 }
+
+private fun shouldFollowLiveBlock(
+    newestBlock: ChatBlock?,
+    hasRows: Boolean,
+    follow: Boolean,
+    listState: LazyListState,
+): Boolean =
+    newestBlock?.kind in liveBlockKinds && hasRows && follow && !listState.isScrollInProgress
+
+private val liveBlockKinds = setOf(
+    ChatBlockKind.ASSISTANT,
+    ChatBlockKind.THINKING,
+    ChatBlockKind.TOOL,
+)
 
 @Composable
 private fun FollowStreamCompletion(
@@ -124,5 +142,3 @@ internal fun BoxScope.ScrollToBottomButton(onClick: () -> Unit) {
 
 internal fun isFarFromBottom(listState: LazyListState, threshold: Int): Boolean =
     listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset > threshold
-
-

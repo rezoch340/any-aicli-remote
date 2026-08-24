@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -35,6 +36,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class ChatEndToEndInstrumentedTest {
@@ -43,6 +46,7 @@ class ChatEndToEndInstrumentedTest {
         const val STREAM_CHUNK_INTERVAL_MILLIS = 50L
         const val STREAM_TIMEOUT_MILLIS = 20_000L
         const val STREAM_MARKER = "AUTOSCROLLENDMARKER"
+        const val POST_SWIPE_MARKER = "STREAMAFTERUSERDRAG"
     }
     @get:Rule val composeRule = createEmptyComposeRule()
 
@@ -154,17 +158,28 @@ class ChatEndToEndInstrumentedTest {
         val streamStarted = AtomicBoolean(false)
         val streamCompleted = AtomicBoolean(false)
         val streamFailure = AtomicReference<Throwable?>(null)
+        val liveMarkerSent = CountDownLatch(1)
+        val continueAfterSwipe = CountDownLatch(1)
+        val completeStream = CountDownLatch(1)
         var streamThread: Thread? = null
         fixture.onRequest = { request ->
             if (request["method"]?.jsonPrimitive?.content == "session/prompt" && streamStarted.compareAndSet(false, true)) {
                 streamThread = Thread {
                     try {
-                        repeat(STREAM_CHUNK_COUNT) { index ->
+                        repeat(STREAM_CHUNK_COUNT / 2) { index ->
                             val chunkText = "\n\n### Stream chunk ${index + 1}\n\nThis is deliberately long streaming content with enough separate Markdown paragraphs to make each chunk occupy visible vertical space. It keeps arriving while the user browses older content.\n\n"
                             fixture.sendNotification("session/update", updateJson("agent_message_chunk", chunkText))
                             Thread.sleep(STREAM_CHUNK_INTERVAL_MILLIS)
                         }
                         fixture.sendNotification("session/update", updateJson("agent_message_chunk", STREAM_MARKER))
+                        liveMarkerSent.countDown()
+                        check(continueAfterSwipe.await(STREAM_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                            "test did not continue stream after user swipe"
+                        }
+                        fixture.sendNotification("session/update", updateJson("agent_message_chunk", POST_SWIPE_MARKER))
+                        check(completeStream.await(STREAM_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                            "test did not release stream completion"
+                        }
                         fixture.sendNotification("session/update", updateJson("turn_completed", ""))
                         fixture.respondTo(request)
                         streamCompleted.set(true)
@@ -177,15 +192,29 @@ class ChatEndToEndInstrumentedTest {
         try {
             openFixtureSession()
             sendChat("long stream")
-            composeRule.waitUntil(STREAM_TIMEOUT_MILLIS) {
-                composeRule.onAllNodesWithText("Stream chunk 15", substring = true).fetchSemanticsNodes().isNotEmpty()
+            check(liveMarkerSent.await(STREAM_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                "fixture did not send live stream marker"
             }
+            composeRule.waitUntil(STREAM_TIMEOUT_MILLIS) {
+                composeRule.onAllNodesWithText(STREAM_MARKER, substring = true)
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            composeRule.onNodeWithText(STREAM_MARKER, substring = true).assertIsDisplayed()
             composeRule.onNodeWithContentDescription("滚动到底部").assertDoesNotExist()
             composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performTouchInput { swipeDown() }
             composeRule.waitUntil(STREAM_TIMEOUT_MILLIS) {
                 composeRule.onAllNodesWithContentDescription("滚动到底部").fetchSemanticsNodes().isNotEmpty()
             }
             composeRule.onNodeWithContentDescription("滚动到底部").assertIsDisplayed()
+            continueAfterSwipe.countDown()
+            composeRule.waitUntil(STREAM_TIMEOUT_MILLIS) {
+                composeRule.onAllNodesWithText(POST_SWIPE_MARKER, substring = true)
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("滚动到底部").assertIsDisplayed()
+            completeStream.countDown()
             composeRule.waitUntil(STREAM_TIMEOUT_MILLIS) { streamCompleted.get() }
             composeRule.onNodeWithContentDescription("滚动到底部").assertIsDisplayed()
             check(streamFailure.get() == null) { "stream fixture failed" }
@@ -198,9 +227,44 @@ class ChatEndToEndInstrumentedTest {
             awaitText(STREAM_MARKER, substring = true)
             composeRule.onNodeWithText(STREAM_MARKER, substring = true).assertIsDisplayed()
         } finally {
+            continueAfterSwipe.countDown()
+            completeStream.countDown()
             streamThread?.join(STREAM_TIMEOUT_MILLIS)
             check(streamThread?.isAlive != true) { "stream fixture thread did not finish" }
             check(streamFailure.get() == null) { "stream fixture failed: ${streamFailure.get()}" }
+        }
+    }
+
+    @Test
+    fun exitPlanOpensExpandedAtTopAndCanBeDismissed() {
+        fixture.onRequest = { request ->
+            if (request["method"]?.jsonPrimitive?.content == "session/prompt") {
+                fixture.sendRequest(
+                    identifier = 93L,
+                    method = "session/interaction_request",
+                    params = exitPlanJson(),
+                )
+            }
+        }
+        openFixtureSession()
+        sendChat("show a long plan")
+
+        val planTitle = composeRule.onNodeWithText("计划待批准", useUnmergedTree = true)
+        planTitle.assertIsDisplayed()
+        val titleTop = planTitle.fetchSemanticsNode().boundsInRoot.top
+        val rootHeight = composeRule
+            .onAllNodes(isRoot())
+            .fetchSemanticsNodes()
+            .maxOf { rootNode -> rootNode.boundsInRoot.height }
+        check(titleTop < rootHeight * 0.35f) {
+            "plan title was not opened near the top: top=$titleTop rootHeight=$rootHeight"
+        }
+
+        activityScenario.onActivity { activity -> activity.onBackPressedDispatcher.onBackPressed() }
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("计划待批准", useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isEmpty()
         }
     }
 
@@ -376,5 +440,22 @@ class ChatEndToEndInstrumentedTest {
                 put("name", "Deny")
             })
         })
+    }.toString()
+
+    private fun exitPlanJson(): String = buildJsonObject {
+        put("providerId", "grok")
+        put("sessionId", "session-1")
+        put("kind", "exit_plan")
+        put("toolCallId", "plan-tool-call")
+        put(
+            "planContent",
+            buildString {
+                append("# Long plan\n\n")
+                repeat(40) { index ->
+                    append("## Step ${index + 1}\n")
+                    append("Detailed plan content that makes the approval sheet scrollable and verifies it starts expanded at the top.\n\n")
+                }
+            },
+        )
     }.toString()
 }
