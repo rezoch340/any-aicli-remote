@@ -46,8 +46,8 @@ then include the checkbox update in that feature's commit.
   - Commits: `b1815b4..90df229`（♻️ 拆分系列与 🐛 修复系列）
 
 - [ ] **5. 子 Agent 实时卡片**
-  - [ ] Backend first: represent each child Agent as a stable typed entity and emit ordered lifecycle/update events rather than asking clients to parse terminal or Markdown text.
-  - [ ] Prove backend event identity, ordering, reconnect replay, history reconstruction, completion, failure, and cancellation with protocol tests before touching app UI.
+  - [x] Backend first: represent each child Agent as a stable typed entity and emit ordered lifecycle/update events rather than asking clients to parse terminal or Markdown text.
+  - [x] Prove backend event identity, ordering, reconnect replay, history reconstruction, completion, failure, and cancellation with protocol tests before touching app UI.
   - [ ] Android next and iOS after it: render the typed card and validate concurrent child Agents, reconnect/history reconstruction, out-of-order updates, completion, failure, and cancellation on both platforms.
   - Commit: `✨ 聊天：新增子 Agent 实时状态卡片`
 

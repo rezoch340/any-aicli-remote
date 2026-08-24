@@ -233,3 +233,48 @@ func assertNoSecrets(testContext *testing.T, payload map[string]any) {
 		}
 	}
 }
+
+// TestNormalizeChildAgentFinishWithUnrecognizedStatusStaysUnknown pins the only
+// lifecycle branch a future Grok terminal status can take. A status this build
+// does not know must surface as unknown/updated so clients never render it as a
+// completed, failed, or cancelled outcome.
+func TestNormalizeChildAgentFinishWithUnrecognizedStatusStaysUnknown(testContext *testing.T) {
+	providerInstance := mustNew(testContext, Config{SessionsDirectory: filepath.Join(testContext.TempDir(), "sessions")})
+
+	method, params := providerInstance.NormalizeAgentNotification("x.ai/session/update", map[string]any{
+		"sessionId": "parent-session",
+		"update": map[string]any{
+			"sessionUpdate":    "subagent_finished",
+			"subagent_id":      "child-1",
+			"child_session_id": "child-session-1",
+			"status":           "timed_out",
+			"duration_ms":      12,
+			"tool_calls":       3,
+			"turns":            4,
+			"tokens_used":      55,
+			"output":           "secret final output",
+			"error":            "secret failure detail",
+		},
+		"_meta": map[string]any{"eventId": "parent-session-21", "agentTimestampMs": 1700000030000.0},
+	})
+
+	assertChildEvent(testContext, method, params, providerapi.ChildAgentEventUpdated, providerapi.ChildAgentStatusUnknown)
+	event := childEventFromParams(testContext, params)
+	for _, rejected := range []providerapi.ChildAgentEventKind{
+		providerapi.ChildAgentEventCompleted,
+		providerapi.ChildAgentEventFailed,
+		providerapi.ChildAgentEventCancelled,
+	} {
+		if event.Kind == rejected {
+			testContext.Fatalf("unrecognized status reported as %s", rejected)
+		}
+	}
+	if event.Sequence == nil || *event.Sequence != 21 {
+		testContext.Fatalf("sequence = %#v", event.Sequence)
+	}
+	if event.Agent.ChildSessionID != "child-session-1" || event.Agent.DurationMS != 12 ||
+		event.Agent.ToolCallCount != 3 || event.Agent.TurnCount != 4 || event.Agent.TokensUsed != 55 {
+		testContext.Fatalf("identity or metrics lost: %#v", event.Agent)
+	}
+	assertNoSecrets(testContext, params)
+}
