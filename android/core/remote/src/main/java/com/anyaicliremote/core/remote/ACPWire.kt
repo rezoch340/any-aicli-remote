@@ -49,6 +49,7 @@ object ACPWire {
     const val sessionsChangedMethod: String = "sessions/changed"
     const val childAgentUpdateMethod: String = "session/child_agent_update"
     const val interactionRequestMethod: String = "session/interaction_request"
+    const val statusUpdateMethod: String = "session/status_update"
 
     fun isPermissionMethod(method: String): Boolean {
         // The daemon translates ask/exit into session/interaction_request, so the

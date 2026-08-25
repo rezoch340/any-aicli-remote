@@ -37,6 +37,7 @@ internal class ChatEventReducer {
                 busy = true,
                 status = "等待助手",
                 selectedFiles = emptyList(),
+                sessionNotice = "",
             ),
         )
     }
@@ -83,7 +84,17 @@ internal class ChatEventReducer {
             is ACPEvent.PermissionRequest -> reducePermissionRequest(state, event)
             is ACPEvent.ChildAgentUpdate -> reduceChildAgent(state, event)
             is ACPEvent.Interaction -> reduceInteraction(state, event)
+            is ACPEvent.SessionStatus -> reduceSessionStatus(state, event)
         }
+    }
+
+    private fun reduceSessionStatus(
+        state: ChatUiState,
+        event: ACPEvent.SessionStatus,
+    ): ChatEventReduction {
+        if (!acceptsSessionEvent(state, event.identity)) return ChatEventReduction(state)
+        val notice = SessionStatusFormatter.notice(event.status)
+        return ChatEventReduction(state.copy(sessionNotice = notice))
     }
 
     private fun reduceChildAgent(
@@ -162,8 +173,10 @@ internal class ChatEventReducer {
             "user_message_chunk" -> {
                 if (pendingUserEchoTracker.consume(text)) state else appendChunk(state, ChatBlockKind.USER, text)
             }
+            "current_mode_update" -> state.copy(sessionMode = update.string("currentModeId", "current_mode_id").orEmpty())
             "agent_message_chunk" -> withTurnStatus(
-                appendChunk(state, ChatBlockKind.ASSISTANT, text),
+                // Fresh assistant output means any prior retry/switch notice is stale.
+                appendChunk(state, ChatBlockKind.ASSISTANT, text).copy(sessionNotice = ""),
                 "正在回复",
             )
             "agent_thought_chunk" -> withTurnStatus(
@@ -176,15 +189,15 @@ internal class ChatEventReducer {
             )
             "plan" -> appendChunk(state, ChatBlockKind.PLAN, text.ifEmpty { "Plan" })
             "session_recap" -> appendChunk(state, ChatBlockKind.SYSTEM, text)
-            "turn_completed", "task_completed" -> finishTurn(state, ToolRunState.SUCCESS, "完成")
-            "cancelled", "turn_cancelled", "task_cancelled" -> {
-                finishTurn(state, ToolRunState.CANCELLED, "已停止")
-            }
-            "turn_failed", "task_failed", "failed", "error" -> {
-                finishTurn(state, ToolRunState.FAILED, "执行失败")
-            }
-            else -> state
+            else -> reduceTerminal(state, type)
         }
+    }
+
+    private fun reduceTerminal(state: ChatUiState, type: String): ChatUiState = when (type) {
+        "turn_completed", "task_completed" -> finishTurn(state, ToolRunState.SUCCESS, "完成")
+        "cancelled", "turn_cancelled", "task_cancelled" -> finishTurn(state, ToolRunState.CANCELLED, "已停止")
+        "turn_failed", "task_failed", "failed", "error" -> finishTurn(state, ToolRunState.FAILED, "执行失败")
+        else -> state
     }
 
     private fun withTurnStatus(state: ChatUiState, status: String): ChatUiState =

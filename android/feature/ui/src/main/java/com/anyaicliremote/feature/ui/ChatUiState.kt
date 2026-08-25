@@ -37,6 +37,8 @@ data class ChatUiState(
     val filePickerError: String? = null,
     val childAgents: List<ChildAgentCard> = emptyList(),
     val pendingInteraction: PendingInteraction? = null,
+    val sessionMode: String = "",
+    val sessionNotice: String = "",
 )
 
 enum class AppDestination { DEVICES, PAIRING, SESSIONS, CHAT }

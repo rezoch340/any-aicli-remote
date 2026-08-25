@@ -178,6 +178,9 @@ func (providerInstance *GrokProvider) NormalizeAgentNotification(method string, 
 	if normalizedMethod, normalizedParams, handled := providerInstance.normalizeChildAgentNotification(method, params); handled {
 		return normalizedMethod, normalizedParams
 	}
+	if normalizedMethod, normalizedParams, handled := providerInstance.normalizeStatusNotification(method, params); handled {
+		return normalizedMethod, normalizedParams
+	}
 	switch method {
 	case "_x.ai/session/update", "x.ai/session/update":
 		return "session/update", params

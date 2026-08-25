@@ -10,6 +10,7 @@ public enum ACPWire {
     public static let childAgentUpdate = "session/child_agent_update"
     public static let sessionsChanged = "sessions/changed"
     public static let interactionRequest = "session/interaction_request"
+    public static let statusUpdate = "session/status_update"
   }
 
   public static func promptParameters(sessionID: String, text: String, attachments: [WorkspaceFile])

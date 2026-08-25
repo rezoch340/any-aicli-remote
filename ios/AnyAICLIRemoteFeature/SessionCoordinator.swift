@@ -42,6 +42,8 @@ final class SessionCoordinator {
     store.selectedSession = session
     store.blocks = []
     store.childAgents = []
+    store.sessionMode = ""
+    store.sessionNotice = ""
     store.isBusy = false
     store.closeWorkspaceFilePicker(clearSelection: true)
     store.statusMessage = "同步历史"
@@ -64,6 +66,8 @@ final class SessionCoordinator {
     store.selectedSession = nil
     store.blocks = []
     store.childAgents = []
+    store.sessionMode = ""
+    store.sessionNotice = ""
     store.isBusy = false
     store.closeWorkspaceFilePicker(clearSelection: true)
     store.statusMessage = store.connection == .connected ? "已连接" : ""
@@ -96,6 +100,8 @@ final class SessionCoordinator {
       store.interactionController.clear()
       store.selectedSession = nil
       store.childAgents = []
+      store.sessionMode = ""
+      store.sessionNotice = ""
       ownership.advanceSession()
       ownership.mountedSessionIdentity = nil
       if let session = try SessionPayloadMapper.createdSession(

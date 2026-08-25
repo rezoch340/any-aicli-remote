@@ -19,6 +19,8 @@ public final class ChatStore: ObservableObject {
   @Published var selectedSession: SessionSummary?
   @Published var blocks: [ChatBlock] = []
   @Published var childAgents: [ChildAgentCard] = []
+  @Published var sessionMode = ""
+  @Published var sessionNotice = ""
   @Published var isBusy = false
   @Published var statusMessage = ""
   @Published var modelState = ModelState()

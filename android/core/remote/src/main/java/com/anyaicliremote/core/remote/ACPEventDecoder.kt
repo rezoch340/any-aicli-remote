@@ -5,6 +5,10 @@ import com.anyaicliremote.core.model.InteractionKind
 import com.anyaicliremote.core.model.InteractionOption
 import com.anyaicliremote.core.model.InteractionQuestion
 import com.anyaicliremote.core.model.PendingInteraction
+import com.anyaicliremote.core.model.ModelSwitch
+import com.anyaicliremote.core.model.RetryStatus
+import com.anyaicliremote.core.model.SessionStatusUpdate
+import com.anyaicliremote.core.model.retryPhase
 import com.anyaicliremote.core.model.PermissionOption
 import com.anyaicliremote.core.model.SessionIdentity
 import com.anyaicliremote.core.model.bool
@@ -32,6 +36,10 @@ sealed interface ACPEvent {
         val card: ChildAgentCard,
     ) : ACPEvent
     data class Interaction(val request: PendingInteraction) : ACPEvent
+    data class SessionStatus(
+        val identity: SessionIdentity?,
+        val status: SessionStatusUpdate,
+    ) : ACPEvent
 }
 
 /** Decodes notification/request JSON without deciding whether the current UI accepts it. */
@@ -47,9 +55,34 @@ object ACPEventDecoder {
             method == ACPWire.sessionsChangedMethod -> ACPEvent.SessionsChanged
             method == ACPWire.childAgentUpdateMethod -> decodeChildAgent(parameters)
             method == ACPWire.interactionRequestMethod -> decodeInteraction(message, parameters)
+            method == ACPWire.statusUpdateMethod -> decodeStatus(parameters)
             ACPWire.isPermissionMethod(method) -> decodePermission(message, parameters)
             else -> null
         }
+    }
+
+    private fun decodeStatus(parameters: JsonObject): ACPEvent.SessionStatus? {
+        val retry = parameters.obj("retry")?.let {
+            RetryStatus(
+                phase = retryPhase(it.string("phase")),
+                attempt = it.long("attempt").toInt(),
+                maxRetries = it.long("maxRetries").toInt(),
+                reason = it.string("reason") ?: "",
+                rateLimit = it.bool("rateLimit") ?: false,
+            )
+        }
+        val modelSwitch = parameters.obj("modelSwitch")?.let {
+            ModelSwitch(
+                previous = it.string("previous") ?: "",
+                current = it.string("current") ?: "",
+                reason = it.string("reason") ?: "",
+            )
+        }
+        if (retry == null && modelSwitch == null) return null
+        return ACPEvent.SessionStatus(
+            identity = parameters.sessionIdentity(),
+            status = SessionStatusUpdate(retry = retry, modelSwitch = modelSwitch),
+        )
     }
 
     private fun decodeChildAgent(parameters: JsonObject): ACPEvent.ChildAgentUpdate? {

@@ -25,6 +25,7 @@ struct ChatView: View {
 
     private var chatContent: some View {
         VStack(spacing: 0) {
+          SessionStatusBar(mode: store.sessionMode, notice: store.sessionNotice)
           if !store.childAgents.isEmpty { ChildAgentStripView(cards: store.childAgents) }
         ChatMessageCollectionView(
             sessionIdentity: session.id,

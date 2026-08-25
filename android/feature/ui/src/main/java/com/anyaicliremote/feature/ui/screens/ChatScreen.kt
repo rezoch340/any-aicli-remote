@@ -33,6 +33,7 @@ import com.anyaicliremote.feature.ui.components.ChatBlockItem
 import com.anyaicliremote.feature.ui.components.InteractionSheetActions
 import com.anyaicliremote.feature.ui.components.InteractionSheet
 import com.anyaicliremote.feature.ui.components.ChildAgentStrip
+import com.anyaicliremote.feature.ui.components.SessionStatusBar
 import com.anyaicliremote.feature.ui.components.ChatComposer
 import com.anyaicliremote.feature.ui.components.ChatComposerActions
 import com.anyaicliremote.feature.ui.components.ChatComposerState
@@ -56,6 +57,8 @@ internal data class ChatContentState(
     val rows: List<ChatRow>,
     val farFromBottom: Boolean,
     val childAgents: List<com.anyaicliremote.core.model.ChildAgentCard>,
+    val sessionMode: String,
+    val sessionNotice: String,
     val onScrollToBottom: () -> Unit,
 )
 
@@ -102,6 +105,8 @@ fun ChatScreen(state: ChatUiState, viewModel: ChatViewModel) {
         rows = rows,
         farFromBottom = farFromBottom,
         childAgents = state.childAgents,
+        sessionMode = state.sessionMode,
+        sessionNotice = state.sessionNotice,
         onScrollToBottom = {
             follow = true
             if (rows.isNotEmpty()) scope.launch { listState.scrollToItem(0) }
@@ -222,10 +227,12 @@ private fun ChatContent(contentState: ChatContentState, modifier: Modifier) {
                 }
             }
         }
-        ChildAgentStrip(
-            contentState.childAgents,
+        androidx.compose.foundation.layout.Column(
             modifier = androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.TopCenter),
-        )
+        ) {
+            SessionStatusBar(contentState.sessionMode, contentState.sessionNotice)
+            ChildAgentStrip(contentState.childAgents)
+        }
         if (contentState.farFromBottom) {
             ScrollToBottomButton(contentState.onScrollToBottom)
         }

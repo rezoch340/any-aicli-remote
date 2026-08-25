@@ -30,6 +30,47 @@ class ACPEventDecoderTest {
     }
 
     @Test
+    fun decodesRetryStatusUpdate() {
+        val event = ACPEventDecoder.decode(buildJsonObject {
+            put("method", ACPWire.statusUpdateMethod)
+            put("params", buildJsonObject {
+                put("providerId", "provider")
+                put("sessionId", "session")
+                put("retry", buildJsonObject {
+                    put("phase", "retrying")
+                    put("attempt", 2)
+                    put("maxRetries", 5)
+                    put("reason", "transient")
+                })
+            })
+        }) as ACPEvent.SessionStatus
+        val retry = event.status.retry!!
+        assertEquals(2, retry.attempt)
+        assertEquals(5, retry.maxRetries)
+        assertEquals(com.anyaicliremote.core.model.RetryPhase.RETRYING, retry.phase)
+        assertNull(event.status.modelSwitch)
+    }
+
+    @Test
+    fun decodesModelSwitchAndIgnoresEmptyStatus() {
+        val switch = ACPEventDecoder.decode(buildJsonObject {
+            put("method", ACPWire.statusUpdateMethod)
+            put("params", buildJsonObject {
+                put("sessionId", "session")
+                put("modelSwitch", buildJsonObject { put("current", "grok-3"); put("reason", "unavailable") })
+            })
+        }) as ACPEvent.SessionStatus
+        assertEquals("grok-3", switch.status.modelSwitch!!.current)
+        // A status update carrying neither retry nor modelSwitch is not an event.
+        assertNull(
+            ACPEventDecoder.decode(buildJsonObject {
+                put("method", ACPWire.statusUpdateMethod)
+                put("params", buildJsonObject { put("sessionId", "session") })
+            }),
+        )
+    }
+
+    @Test
     fun wrongSessionIdentityRemainsDistinct() {
         val event = ACPEventDecoder.decode(buildJsonObject {
             put("method", ACPWire.sessionUpdateMethod)

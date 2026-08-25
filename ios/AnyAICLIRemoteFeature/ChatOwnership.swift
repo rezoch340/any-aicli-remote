@@ -77,6 +77,8 @@ final class ChatOwnership {
     store.selectedSession = nil
     store.blocks = []
     store.childAgents = []
+    store.sessionMode = ""
+    store.sessionNotice = ""
     store.isBusy = false
     store.modelState = ModelState()
     store.closeWorkspaceFilePicker(clearSelection: true)

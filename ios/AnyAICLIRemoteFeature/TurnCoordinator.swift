@@ -146,10 +146,18 @@ final class TurnCoordinator {
       )
     case .interaction(let request):
       store.interactionController.receive(request)
+    case .status(let status):
+      store.sessionNotice = SessionStatusFormatter.notice(status)
+    case .mode(let mode):
+      store.sessionMode = mode
     }
   }
 
   private func applyTranscriptUpdate(_ update: [String: Any]) {
+    // Fresh assistant output means any prior retry / switch notice is stale.
+    if (update["sessionUpdate"] as? String) == "agent_message_chunk" {
+      store.sessionNotice = ""
+    }
     switch ChatTranscriptReducer.apply(
       update: update, to: &store.blocks,
       pendingUserEchoTracker: ownership.pendingUserEchoTracker) {
