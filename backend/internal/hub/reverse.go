@@ -45,6 +45,7 @@ func (hubInstance *Hub) handleReverseAsync(
 		return false
 	}
 	if reverseRequest.Operation == providerapi.PermissionOperation {
+		applyPermissionTitle(params, reverseRequest.DisplayTitle)
 		hubInstance.forwardReverseRequest(object, reverseRequest.SessionID, true, providerapi.InteractionRequest{}, agentGeneration)
 		return true
 	}
@@ -365,4 +366,23 @@ func (hubInstance *Hub) replyInteractionUnavailable(identifier any, message stri
 		"jsonrpc": "2.0", "id": identifier,
 		"error": map[string]any{"code": providerReverseOperationErrorCode, "message": message},
 	})
+}
+
+// applyPermissionTitle writes a neutral, human-readable title into the forwarded
+// permission request's ACP toolCall so clients can show what is being authorized
+// without reading any provider-private field. It never overwrites a title the
+// agent already provided.
+func applyPermissionTitle(params map[string]any, title string) {
+	if strings.TrimSpace(title) == "" {
+		return
+	}
+	toolCall, isObject := params["toolCall"].(map[string]any)
+	if !isObject {
+		toolCall = map[string]any{}
+		params["toolCall"] = toolCall
+	}
+	if existing, present := toolCall["title"].(string); present && strings.TrimSpace(existing) != "" {
+		return
+	}
+	toolCall["title"] = title
 }

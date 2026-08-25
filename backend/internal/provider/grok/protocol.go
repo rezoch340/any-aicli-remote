@@ -227,6 +227,7 @@ func (providerInstance *GrokProvider) ClassifyReverseRequest(method string, para
 		lowerMethod := strings.ToLower(method)
 		if method == acp.ClientMethodSessionRequestPermission || method == "session/requestPermission" || strings.Contains(lowerMethod, "permission") {
 			request.Operation = providerapi.PermissionOperation
+			request.DisplayTitle = permissionDisplayTitle(params)
 		} else {
 			return providerapi.ReverseRequest{}, false
 		}

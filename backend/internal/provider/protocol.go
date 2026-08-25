@@ -52,6 +52,10 @@ type ReverseRequest struct {
 	Operation     ReverseOperation
 	SessionID     string
 	RequestedPath string
+	// DisplayTitle is a provider-neutral, human-readable description of what a
+	// permission request authorizes (e.g. the command). The hub writes it into
+	// the forwarded ACP toolCall.title so clients need no provider-wire knowledge.
+	DisplayTitle string
 }
 
 type NotificationKind int

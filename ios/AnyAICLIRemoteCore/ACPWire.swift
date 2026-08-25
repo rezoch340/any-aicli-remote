@@ -45,7 +45,9 @@ public enum ACPWire {
   }
 
   public static func isPermissionRequest(method: String) -> Bool {
-    method == "permission/request"
+    // ACP standard is session/request_permission; match any permission method,
+    // consistent with the daemon's classifier and the Android client.
+    method.lowercased().contains("permission")
   }
 
   public static func permissionReplyResult(optionID: String?) -> [String: Any] {

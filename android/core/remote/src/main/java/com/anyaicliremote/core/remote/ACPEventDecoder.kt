@@ -146,10 +146,13 @@ object ACPEventDecoder {
                 label = it.string("name", "label") ?: "允许",
             )
         }.ifEmpty { listOf(PermissionOption("allow", "允许")) }
+        // The daemon writes what is being authorized into the ACP-standard
+        // toolCall.title; fall back to legacy fields, then a generic prompt.
+        val command = parameters.obj("toolCall")?.string("title")
         return ACPEvent.PermissionRequest(
             requestId = requestId,
             identity = parameters.sessionIdentity(),
-            question = parameters.string("question", "message") ?: "AI CLI 需要你的确认",
+            question = command ?: parameters.string("question", "message") ?: "AI CLI 需要你的确认",
             options = options,
         )
     }

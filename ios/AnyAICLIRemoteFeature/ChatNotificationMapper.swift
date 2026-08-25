@@ -107,10 +107,13 @@ enum ChatNotificationMapper {
         label: $0.string("name", "label") ?? "允许"
       )
     }
+    // The daemon writes what is being authorized into the ACP-standard
+    // toolCall.title; fall back to legacy fields, then a generic prompt.
+    let command = parameters.object("toolCall")?.string("title")
     return .permission(
       PermissionRequest(
         rpcID: rpcID,
-        question: parameters.string("question", "message") ?? "CLI 需要你的确认",
+        question: command ?? parameters.string("question", "message") ?? "CLI 需要你的确认",
         options: options
       )
     )
