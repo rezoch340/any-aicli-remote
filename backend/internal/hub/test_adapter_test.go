@@ -134,6 +134,10 @@ func (providerInstance *testProvider) NormalizeAgentNotification(method string, 
 	return method, params
 }
 
+func (providerInstance *testProvider) AutoDeclineNotification(method string, params map[string]any) (map[string]any, bool) {
+	return nil, false
+}
+
 func (providerInstance *testProvider) ClassifyReverseRequest(method string, params map[string]any) (providerapi.ReverseRequest, bool) {
 	request := providerapi.ReverseRequest{SessionID: stringValue(params["sessionId"])}
 	switch method {

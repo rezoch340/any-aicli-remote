@@ -92,6 +92,12 @@ type ProtocolAdapter interface {
 	TextPromptRequest(sessionID string, text string) (string, map[string]any)
 	EffortRequest(sessionID string, modelID string, effort string) (string, map[string]any)
 	NormalizeAgentNotification(method string, params map[string]any) (string, map[string]any)
+	// AutoDeclineNotification lets an adapter intercept a provider notification the
+	// daemon should answer on the operator's behalf instead of surfacing it (e.g. a
+	// product-feedback prompt). When handled is true the notification is not
+	// forwarded to clients; agentReply, when non-nil, is a JSON-RPC message the hub
+	// sends to the agent (the hub assigns its id).
+	AutoDeclineNotification(method string, params map[string]any) (agentReply map[string]any, handled bool)
 	ClassifyReverseRequest(method string, params map[string]any) (ReverseRequest, bool)
 	DaemonNotification(NotificationKind, map[string]any) (string, map[string]any)
 	// NormalizeInteractionRequest converts a provider reverse interaction request

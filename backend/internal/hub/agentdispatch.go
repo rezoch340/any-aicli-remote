@@ -7,6 +7,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 
 	providerapi "github.com/rezoch340/any-aicli-remote/backend/internal/provider"
 )
@@ -72,6 +73,13 @@ func (hubInstance *Hub) handleAgentMessage(raw []byte, agentGeneration uint64, a
 		params, _ := object["params"].(map[string]any)
 		if params == nil {
 			params = map[string]any{}
+		}
+		if agentReply, handled := hubInstance.protocol.AutoDeclineNotification(method, params); handled {
+			if agentReply != nil {
+				agentReply["id"] = atomic.AddInt64(&hubInstance.nextID, 1)
+				hubInstance.replyAgentForGeneration(agentGeneration, agentReply)
+			}
+			return
 		}
 		normalizedMethod, normalizedParams := hubInstance.protocol.NormalizeAgentNotification(method, params)
 		if normalizedMethod == "" {
