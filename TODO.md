@@ -60,6 +60,16 @@ then include the checkbox update in that feature's commit.
   - [x] Android 先、iOS 后：实现 pending 交互 UI、ask 表单与 plan 预览/操作；客户端只消费中立 `session/interaction_request`，不解析 provider wrapper。
   - Commit: `✨ 聊天：新增结构化交互与计划确认`
 
+- [ ] **8. 扩展流式与交互 primitive（全部归一化）**
+  - 原则：客户端只消费 provider-neutral payload，**绝不解析 grok 原语**；能复用现有中立通道的复用，只在必需时新增一条中立方法。grok primitive 面见记忆/盘点：官方 session/update 扩展变体 ~50，仅少数对远程手机客户端有意义。
+  - 归一化落点：`tool_call_delta_chunk`→复用中立 tool-call 更新（append 语义）；`model_changed`/`model_auto_switched`→复用现有 ModelState 通道；`current_mode_update`+`retry_state`→新增一条中立 `session/status_update`（带 mode/retry 枚举）；`feedback_request`（通知式、带 app 层 request_id、应答走 `x.ai/feedback` 调用）→新增中立 feedback 交互通道（通知进 + 应答方法出）。
+  - [ ] Phase 1（不改契约）：Android ask 表单追平已发布的 iOS——`InteractionAnswer` 加 annotations（每题 notes）与 cancelAsk；加"先聊一下"（chat_about_this + partialAnswers）、"取消"、每题备注输入；两端补 `chat_about_this` 可达按钮。后端契约已支持，纯客户端。
+  - [ ] Phase 2（复用通道）：`tool_call_delta_chunk` 折进中立 tool 更新；`model_changed`/`auto_switched` 走 ModelState。后端归一化 + 两端消费 + 测试。
+  - [ ] Phase 3（新增 1 条中立方法）：`current_mode_update`+`retry_state`→`session/status_update`，中立 mode/retry 枚举；两端渲染 badge/状态行。
+  - [ ] Phase 4（feedback 交互）：`feedback_request`→中立 feedback 交互；daemon 通知归一化 + 应答映回 `x.ai/feedback`（带 request_id）；两端 UI（dismissible）。
+  - 每 Phase：后端先（含协议测试）→ Android → iOS；grok 私有解析只在 `internal/provider/grok`，中立契约在 `internal/provider`。
+  - Commit：每 Phase 一个 `✨` 提交。
+
 - [ ] **7. 最终发布**
   - [ ] Run the complete Go/macOS/iOS/Android pipeline, privacy and legacy-brand scans, and final real Grok smoke test.
   - [ ] Release signing/notarization and package signature verification happen last, when credentials are available.

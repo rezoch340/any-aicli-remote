@@ -22,6 +22,37 @@ class InteractionAnswerCodecTest {
     }
 
     @Test
+    fun acceptEncodesPerQuestionNotesAsAnnotations() {
+        val result = InteractionAnswerCodec.toResult(
+            InteractionAnswer.Accept(
+                answers = mapOf("0" to listOf("Other")),
+                annotations = mapOf("0" to com.anyaicliremote.core.model.InteractionAnnotation("  用 Redis  ")),
+            ),
+        )
+        val annotations = result["annotations"] as JsonObject
+        // Notes are trimmed and keyed by the same question index as answers.
+        assertEquals("用 Redis", (annotations["0"] as JsonObject)["notes"].let { (it as JsonPrimitive).content })
+    }
+
+    @Test
+    fun acceptOmitsBlankAnnotations() {
+        val result = InteractionAnswerCodec.toResult(
+            InteractionAnswer.Accept(
+                answers = mapOf("0" to listOf("A")),
+                annotations = mapOf("0" to com.anyaicliremote.core.model.InteractionAnnotation("   ")),
+            ),
+        )
+        assertNull(result["annotations"])
+    }
+
+    @Test
+    fun cancelAskEncodesCancelledOutcome() {
+        val result = InteractionAnswerCodec.toResult(InteractionAnswer.CancelAsk)
+        assertEquals("cancelled", result.stringOf("outcome"))
+        assertNull(result["answers"])
+    }
+
+    @Test
     fun approveHasNoFeedback() {
         val result = InteractionAnswerCodec.toResult(InteractionAnswer.Approve)
         assertEquals("approved", result.stringOf("outcome"))

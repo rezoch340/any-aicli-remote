@@ -16,6 +16,9 @@ data class InteractionQuestion(
     val multiSelect: Boolean = false,
 )
 
+/** Free-text operator note attached to one answered question. */
+data class InteractionAnnotation(val notes: String)
+
 /**
  * A provider-neutral interaction the agent is blocking on. The client renders it
  * and sends a neutral answer keyed by [rpcId]; it never parses a provider wire.
@@ -37,10 +40,16 @@ data class PendingInteraction(
  * daemon's neutral response shape; the client never builds a provider payload.
  */
 sealed interface InteractionAnswer {
-    /** Ask answer: question index -> selected option labels. */
-    data class Accept(val answers: Map<String, List<String>>) : InteractionAnswer
+    /** Ask answer: question index -> selected option labels, plus optional per-question notes. */
+    data class Accept(
+        val answers: Map<String, List<String>>,
+        val annotations: Map<String, InteractionAnnotation> = emptyMap(),
+    ) : InteractionAnswer
     data class ChatAbout(val partialAnswers: Map<String, String>) : InteractionAnswer
     data class SkipInterview(val partialAnswers: Map<String, String>) : InteractionAnswer
+
+    /** Dismiss an ask without answering. */
+    data object CancelAsk : InteractionAnswer
 
     /** Exit-plan answers. */
     data object Approve : InteractionAnswer
