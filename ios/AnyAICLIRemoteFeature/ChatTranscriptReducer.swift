@@ -66,8 +66,8 @@ enum ChatTranscriptReducer {
     let callID = update.string("toolCallId", "tool_call_id", "id") ?? UUID().uuidString
     let title = update.string("title", "toolName", "kind")
     let status = update.string("status", "toolStatus")
-    let detail =
-      update.string("content", "result") ?? update.object("content")?.string("text") ?? ""
+    let contentText = toolContentText(update)
+    let detail = contentText.isEmpty ? (update.string("result") ?? "") : contentText
     if let index = blocks.firstIndex(where: { $0.id == "tool-\(callID)" }) {
       if let title { blocks[index].title = title }
       if status != nil { blocks[index].toolState = ToolRunState(raw: status) }
@@ -78,6 +78,15 @@ enum ChatTranscriptReducer {
           id: "tool-\(callID)", kind: .tool, title: title ?? "工具", detail: detail,
           toolState: ToolRunState(raw: status)))
     }
+  }
+
+  // ACP tool content is an array of ToolCallContent: {type:"content", content:{type:"text",text}}.
+  // The daemon normalizes provider deviations to this shape; a bare {type:"text",text} item is
+  // still read defensively. Text blocks are concatenated into the tool's displayed output.
+  private static func toolContentText(_ update: [String: Any]) -> String {
+    update.array("content").map { item in
+      item.object("content")?.string("text") ?? item.string("text") ?? ""
+    }.joined()
   }
 }
 

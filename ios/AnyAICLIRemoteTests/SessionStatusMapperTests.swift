@@ -13,7 +13,7 @@ final class SessionStatusMapperTests: XCTestCase {
 
   func testMapsRetryStatus() {
     let payload = statusPayload(["retry": [
-      "phase": "retrying", "attempt": 2, "maxRetries": 5, "reason": "transient",
+      "phase": "retrying", "attempt": 2, "maxRetries": 5, "reason": "transient"
     ]])
     guard case let .status(status)? = ChatNotificationMapper.map(payload: payload, selectedSessionID: identity) else {
       return XCTFail("expected status")
@@ -43,7 +43,7 @@ final class SessionStatusMapperTests: XCTestCase {
   func testCurrentModeUpdateRoutesToModeNotAsTranscript() {
     let payload: [String: Any] = ["method": ACPWire.Method.sessionUpdate, "params": [
       "providerId": "provider-a", "sessionId": "session-a",
-      "update": ["sessionUpdate": "current_mode_update", "currentModeId": "plan"],
+      "update": ["sessionUpdate": "current_mode_update", "currentModeId": "plan"]
     ]]
     guard case let .mode(mode)? = ChatNotificationMapper.map(payload: payload, selectedSessionID: identity) else {
       return XCTFail("expected mode")

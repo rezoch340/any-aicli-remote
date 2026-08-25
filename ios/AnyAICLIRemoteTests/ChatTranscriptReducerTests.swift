@@ -21,4 +21,28 @@ final class ChatTranscriptReducerTests: XCTestCase {
             pendingUserEchoTracker: tracker)
         XCTAssertEqual(blocks.last?.text, "第一段第二段")
     }
+
+    func testToolOutputComesFromStandardAcpContentArray() {
+        var blocks: [ChatBlock] = []
+        let tracker = PendingUserEchoTracker()
+        _ = ChatTranscriptReducer.apply(
+            update: [
+                "sessionUpdate": "tool_call_update", "toolCallId": "ls-1", "status": "completed",
+                "content": [["type": "content", "content": ["type": "text", "text": "file-a\nfile-b"]]]
+            ],
+            to: &blocks, pendingUserEchoTracker: tracker)
+        XCTAssertEqual(blocks.first(where: { $0.kind == .tool })?.detail, "file-a\nfile-b")
+    }
+
+    func testToolOutputAlsoReadsBareContentBlockDefensively() {
+        var blocks: [ChatBlock] = []
+        let tracker = PendingUserEchoTracker()
+        _ = ChatTranscriptReducer.apply(
+            update: [
+                "sessionUpdate": "tool_call", "toolCallId": "ls-2",
+                "content": [["type": "text", "text": "out"]]
+            ],
+            to: &blocks, pendingUserEchoTracker: tracker)
+        XCTAssertEqual(blocks.first(where: { $0.kind == .tool })?.detail, "out")
+    }
 }

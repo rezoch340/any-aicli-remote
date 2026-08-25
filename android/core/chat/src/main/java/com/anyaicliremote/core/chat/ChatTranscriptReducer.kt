@@ -4,6 +4,7 @@ import com.anyaicliremote.core.model.ChatBlock
 import com.anyaicliremote.core.model.ChatBlockKind
 import com.anyaicliremote.core.model.ToolRunState
 import com.anyaicliremote.core.model.obj
+import com.anyaicliremote.core.model.objects
 import com.anyaicliremote.core.model.string
 import com.anyaicliremote.core.model.toolState
 import kotlinx.serialization.json.JsonObject
@@ -28,7 +29,7 @@ object ChatTranscriptReducer {
         val blockIdentifier = "tool-$toolIdentifier"
         val title = update.string("title", "toolName", "kind")
         val statusValue = update.string("status", "toolStatus")
-        val detail = update.string("result") ?: update.obj("content")?.string("text") ?: ""
+        val detail = toolContentText(update).ifEmpty { update.string("result") ?: "" }
         val result = blocks.toMutableList()
         val index = result.indexOfFirst { it.id == blockIdentifier }
         if (index >= 0) {
@@ -57,6 +58,14 @@ object ChatTranscriptReducer {
             } else {
                 block
             }
+        }
+
+    // ACP tool content is an array of ToolCallContent: {type:"content", content:{type:"text",text}}.
+    // The daemon normalizes provider deviations to this shape; a bare {type:"text",text} item is
+    // still read defensively. Text blocks are concatenated into the tool's displayed output.
+    private fun toolContentText(update: JsonObject): String =
+        update.objects("content").joinToString("") { item ->
+            item.obj("content")?.string("text") ?: item.string("text") ?: ""
         }
 
     private val MERGEABLE_KINDS = setOf(ChatBlockKind.USER, ChatBlockKind.ASSISTANT, ChatBlockKind.THINKING)
