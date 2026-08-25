@@ -1,127 +1,48 @@
 # 交接说明
 
-## 1. 当前状态
+## 当前状态
 
-- 后端 item 5（子 Agent）与 item 6（结构化交互 ask/exit）**已完成、已提交、已推送**，合同冻结。
-- **Android item 5 + 6 客户端代码已写完，全量静态门禁通过，但尚未提交、尚未真机验证。**
-  工作区有 10 改 + 9 新（`git status` 见下），行数约 +760。
-- iOS item 5 + 6 客户端**未开始**。
-- item 7 发布未开始。
+- `main` 与 `origin/main` 均位于 `fc590e6`，本会话 6 个 commit 已推送，工作区干净。
+- item 0–6 完成；**item 8（扩展与归一化）本会话全做完**；item 7（最终发布）待做。
+- 三端**静态门禁 + 单测全绿**（Go quality/vet、Android unit/detekt/lint/assemble、iOS SwiftLint + 93 unit），但 UI 改动**未真机验证**——这是提交后的硬门槛，见下「待验」。
+- 运行态：daemon 已关闭（2421/2419 无监听）。真机 E2E 前须按现有流程启动 daemon 再 health check，配对密钥在钥匙串（服务 `com.anyaicliremote.launcher`、账户 `pairing-secret`），不要依赖固定 PID 或临时文件。
 
-优先级：Android 这批**先真机验证再提交**（静态门禁不覆盖真实交互），然后按 AGENTS.md
-顺序做 iOS。
+## 本会话 6 个 commit（都已推送）
 
-## 2. 未提交的 Android 改动（本次工作）
+1. `7dfe4d8` item 8 Phase 1：Android ask 表单追平已发布的 iOS——`InteractionAnswer` 加 annotations（每题 notes）与 CancelAsk；ask 表单加自由文本框（一物两用：Other 答案 + 备注）、plan 模式露「先聊一下」「跳过」、常驻「取消」「提交」。后端契约早支持，纯客户端。
+2. `ac81bb8` item 8 Phase 2：grok 私有 `retry_state`、`model_auto_switched` 后端归一化为中立 `session/status_update`；`current_mode_update`（ACP 标准）客户端直读。两端 `SessionStatusBar`（mode 徽章 + 通知行）。归一化在 `internal/provider/grok/status.go`（复用 `parseChildAgentEnvelope`），中立契约 `internal/provider/status.go`。
+3. `13bf7b9` **工具输出 bug**：ACP 的 `ToolCall(Update).content` 是**数组**，两端却当对象读 → `ls` 等输出永丢。归一化修：daemon `normalizeToolContent`（grok/toolcontent.go）把 grok 扁平项 `{type:text,text}` 包成 ACP 标准 `{type:content,content:{...}}`；两端 `upsertTool` 遍历数组取文本。**对 claude 也曾坏，非 grok 特有**（据 zed ACP 规范 tool_call.rs + claude-agent-acp 源码确认）。
+4. `dd75f1e` **权限双修**：①卡片看不到命令——命令在 grok 私有 `_meta["x.ai/tool"]`（ACP 禁止客户端读 _meta），故 daemon `ClassifyReverseRequest` 提取命令（grok/permission.go）、hub `applyPermissionTitle` 写进标准 `toolCall.title`，两端只读标准字段。②**iOS 权限从不识别**——`isPermissionRequest` 只认 `permission/request`，但 ACP 标准是 `session/request_permission`，导致 grok 权限卡在 iOS 从不弹；改为 `contains("permission")`，与 daemon/Android 一致。回包 `{outcome:{outcome:selected,optionId}}` 早已正确。
+5. `fc590e6` item 8 Phase 4：`feedback_request` 是 xAI 评分/NPS 漏斗，不做客户端 UI。新增 provider 接口 `AutoDeclineNotification`，grok 认出即回 `x.ai/feedback/dismiss {session_id,request_id}`（hub 赋 id/代际校验/复用 replyAgentForGeneration）且不转发客户端。
+6. `43892de` TODO 记录。
 
-按模块拆分，未往 ViewModel/reducer 堆实现——`ChatEventReducer.reduceNotification`
-只加了两行分发，状态变换全在独立纯函数/控制器里。
+## 待验（真机，接手第一件事，按此顺序）
 
-### 新增文件
-- `core/model/ChildAgent.kt` — `ChildAgentCard`、`ChildAgentStatus`、`childAgentStatus()`。
-- `core/model/Interaction.kt` — `PendingInteraction`、`InteractionKind`、`InteractionQuestion`、
-  `InteractionOption`、`InteractionAnswer`（sealed：Accept/ChatAbout/SkipInterview/Approve/
-  Cancel/Abandon）。
-- `core/chat/ChildAgentReducer.kt` — 纯函数：按 providerChildId 合并、sequence 代际去重、
-  终态不被旧事件覆盖、空字段不擦除已有值。
-- `core/session/InteractionAnswerCodec.kt` — typed 答案 → 中立 JSON。**answers 必须编码成
-  JSON object（键=问题索引串），发数组会被 daemon 拒**。
-- `feature/ui/InteractionController.kt` — 应答/取消 pending 交互，带 rpcId 校验。
-- `feature/ui/components/ChildAgentStrip.kt` — 横向卡片条（展示态，不渲染 prompt/输出）。
-- `feature/ui/components/InteractionSheet.kt` — ModalBottomSheet：AskForm（多问题多选/单选 +
-  提交/跳过）、PlanApproval（计划正文 + 批准/取消带 feedback）。
+装 MuMu（`adb connect 127.0.0.1:5555`、`adb reverse tcp:2421 tcp:2421`、`./gradlew installDebug`）或 iOS 模拟器，接**真实 grok daemon**：
 
-### 改动文件
-- `core/remote/ACPEventDecoder.kt` — 加 `ACPEvent.ChildAgentUpdate`、`ACPEvent.Interaction`
-  两个变体与解码。
-- `core/remote/ACPWire.kt` — 加 `childAgentUpdateMethod`、`interactionRequestMethod` 常量；
-  `classifyIncomingRequest` 认 `session/interaction_request` 为 UI_HANDLED；`isPermissionMethod`
-  删掉 `ask_user` 子串（现在客户端只收中立方法名，那是死代码）。
-- `core/session/SessionController.kt` — `answerInteraction()`；`SessionHistory` 加 `childAgents`；
-  `loadHistory` 填充历史快照。
-- `core/session/SessionPayloadMapper.kt` — `childAgents()` 解析历史 `childAgents` 数组。
-- `feature/ui/ChatUiState.kt` — 加 `childAgents`、`pendingInteraction` 字段。
-- `feature/ui/ChatEventReducer.kt` — dispatch 两个新事件（带 session 守卫），委派纯函数。
-- `feature/ui/SessionCoordinator.kt` — 打开/关闭会话时重置 childAgents+pendingInteraction，
-  历史加载时填充 childAgents。
-- `feature/ui/ChatViewModel.kt` — 接入 InteractionController，暴露 answerInteraction/
-  dismissInteraction。
-- `feature/ui/screens/ChatScreen.kt` — ChatContent 顶部渲染 ChildAgentStrip；根部挂
-  InteractionSheet。
-- `core/remote/ACPWireTest.kt` — 把 `session/ask_user` 断言改为 `session/interaction_request`。
+1. **工具输出**（最该验，本会话核心修复）：发「列出当前目录文件」等会触发 bash/ls 的 prompt，确认工具卡**显示命令输出**（此前为空）。
+2. **权限卡**：触发需授权的命令（写文件/危险命令），确认卡片**显示要执行的命令**（如「bash: ls -la」）而非笼统「需要你的确认」；**iOS 尤其要验权限卡是否弹出**（此前从不弹）；点允许/拒绝确认生效。
+3. **ask 表单**：`/plan` + 让 grok 先 `ask_user_question`，验每题备注框、取消、先聊一下、提交。
+4. **状态徽章**：计划模式徽章、弱网下的重试提示（能触发的话）。
+5. 回归：`./scripts/android-connected-e2e.sh`、`IOS_SIMULATOR_ID=<uuid> ./scripts/ios-live-daemon-e2e.sh`。
 
-### 已有测试
-- `core/chat/ChildAgentReducerTest.kt`（4）：插入保序、原地合并、乱序 stale 丢弃、空字段不擦除。
-- `core/session/InteractionAnswerCodecTest.kt`（5）：accept 的 answers 是 object、approve 无
-  feedback、cancel 空 feedback 省略、abandon、chat/skip 的 partialAnswers。
+## 归一化原则（勿违背）
 
-## 3. 接手者第一步：Android 真机验证
+- 客户端只消费 provider-neutral / ACP-标准 payload，**绝不解析 grok 私有 wire 或 `_meta` 内命名空间键**（ACP 明令禁止解读 _meta）。grok 偏差一律在 `internal/provider/grok` 适配器边界吸收。
+- 本会话所有修复都据 grok 开源（`xai-org/grok-build`）与 zed ACP 规范（`agentclientprotocol/agent-client-protocol`）+ claude 适配（`agentclientprotocol/claude-agent-acp`）交叉确认；改 wire 前先读源码，别猜。
 
-静态门禁（unit+detekt+lint+assembleDebug）**已过**，但没验真实交互。必须做：
+## 验收命令
 
-1. daemon：`(cd backend && go build -o <tmp>/daemon ./cmd/any-aicli-remote-daemon)`，
-   `-pairing-secret-file`（600 临时文件）、`-provider-path ~/.grok/bin/grok`、端口 2421。
-   配对密钥在钥匙串：服务 `com.anyaicliremote.launcher`、账户 `pairing-secret`。
-2. Android 模拟器是 **MuMu**（不是 AVD）：`adb connect 127.0.0.1:5555`，API 32 / arm64。
-   `adb reverse tcp:2421 tcp:2421`。`./gradlew installDebug`。
-3. **子 Agent 卡片**：发一个会 spawn 子 Agent 的 prompt（真实 grok 会用 explore/code
-   子 Agent），看聊天顶部卡片条出现、状态从运行中→已完成。重开会话验历史快照。
-4. **交互**：发 `/plan 为空目录设计缓存层，规划前先用 ask_user_question 问我 Redis 还是
-   进程内 LRU`。应看到 AskForm 弹出→选一项提交→agent 继续→随后 exit_plan 的 PlanApproval
-   弹出→批准。（wire 与应答形状见记忆 `grok-ask-exit-wire`。）
-5. `./scripts/android-connected-e2e.sh` 回归。
-6. 验完再提交（一个 `✨ 聊天：新增子 Agent 实时状态卡片` 或按 TODO 的 commit 文案）。
+```sh
+./scripts/check-go-quality.sh
+cd android && ./gradlew testDebugUnitTest detekt lintDebug assembleDebug
+./scripts/check-native-source-quality.sh
+cd ios && xcodebuild test -project AnyAICLIRemote.xcodeproj -scheme AnyAICLIRemote -destination 'platform=iOS Simulator,id=<uuid>' -only-testing:AnyAICLIRemoteTests
+```
 
-## 4. iOS 待做（item 5 + 6，Android 之后）
+## 不要做
 
-按冻结的中立 payload 实现等价功能，**不复制 wire 解析**：
-- 解码 `session/child_agent_update`、`session/interaction_request`（带 id 反向请求）。
-- reducer/state：childAgents 列表（代际去重）、pendingInteraction。
-- 应答：`InteractionAnswerCodec` 等价，answers 编码成 map。
-- UI：子 Agent 卡片 + 交互 sheet（ask 表单 + plan 批准）。
-- 历史：`/messages` 响应的 `childAgents` 快照。
-- iOS 参照 `ios/AnyAICLIRemoteFeature` 现有 ChatStore/协调器结构，同样拆模块。
-
-## 5. 冻结的后端合同（客户端只消费中立 payload，绝不解析 _x.ai wrapper）
-
-### 子 Agent（item 5，commit 9549f5a + d08b51d）
-- 通知方法 `session/child_agent_update`，params `{sessionId, event}`。
-  `event = {eventId, sequence?, occurredAt, replay, kind, agent}`。
-  `kind`：started/progress/completed/failed/cancelled/updated。
-  `agent`（ChildAgentRecord）字段 camelCase：providerChildId、childSessionId、agentType、
-  description、status（running/completed/failed/cancelled/unknown）、startedAt、completedAt、
-  toolCallCount、turnCount、modelId、tokensUsed、contextUsagePercent…
-- 历史快照：`/api/sessions/{id}/messages` 响应的 `childAgents: [ChildAgentRecord]`。
-- 排序/去重靠 `sequence`（来自 eventId 后缀）；未知终态冒泡为 unknown/updated（有测试钉住）。
-
-### 结构化交互（item 6，commit 98e149a）
-- daemon 把 grok 私有 `_x.ai/ask_user_question`、`_x.ai/exit_plan_mode`（**带 id 反向请求**）
-  归一为中立 `session/interaction_request`（**仍带 id**），params：
-  `{kind: ask_question|exit_plan, sessionId, toolCallId, questions[{question,
-  options[{label,description}], multiSelect}], planContent, mode}`。
-- 应答：客户端对该 id 回 JSON-RPC `result`，中立形状：
-  - exit：`{outcome: approved}` / `{outcome: cancelled, feedback?}` / `{outcome: abandoned}`
-  - ask：`{outcome: accepted, answers: {"0":["label"]}}`（answers 必须 object）/
-    `{outcome: chat_about_this, partialAnswers}` / `{outcome: skip_interview, partialAnswers}`
-- daemon 复用 permission 的 session 定向 + first-answer-wins + 断连取消；交互失败一律回
-  JSON-RPC error（与 agent 断连后「重现」一致）；unknown/畸形 fail closed。
-- 完整实测细节见记忆 `grok-ask-exit-wire`；应答枚举以开源 `xai-org/grok-build` 源码为准。
-
-## 6. TODO 勾选状态
-
-- item 5：后端两条子项已勾（d08b51d）；客户端子项未勾（Android 已写未提交，iOS 未做）。
-- item 6：后端四条子项已勾（48a94f1）；客户端子项未勾。
-- 顶层 item 5、6 未勾，因为客户端未完成。按 AGENTS.md，勾选与功能提交同一个 commit。
-
-## 7. 验收命令
-
-- 后端：`./scripts/check-go-quality.sh`（当前通过）。
-- Android：`testDebugUnitTest detekt lintDebug assembleDebug`（当前通过）+
-  `./scripts/android-connected-e2e.sh`（真机，未跑）。
-- iOS：`xcodegen` + `check-native-source-quality.sh` + `xcodebuild test` 模拟器 +
-  `scripts/ios-live-daemon-e2e.sh`（需 `IOS_SIMULATOR_ID`）。
-
-## 8. 不要做
-
-不要让客户端解析 `_x.ai/*` wrapper；不要把 plan/子 Agent 当文本卡塞进 ChatBlock（已分别用
-PendingInteraction / ChildAgentCard 独立建模）；不要往 ViewModel/Store/provider.go 堆职责；
-不要升级依赖；不要创建或切换 worktree。
+- 不让客户端解析 `_x.ai/*` / `x.ai/tool` 等私有字段；不把职责堆回 ViewModel/ChatStore/reducer。
+- iOS 不手改 generated project：先改 `project.yml` 再 `xcodegen generate`（本会话新增 .swift 已按目录 glob 纳入）。
+- 不升级依赖；不创建/切换 worktree。
+- 命名门禁：Go 禁止 <3 字符局部名（用 `isObject`/`hasMeta` 等）；iOS SwiftLint 禁集合字面量尾逗号。
