@@ -30,14 +30,14 @@ import com.anyaicliremote.core.model.ToolRunState
 import com.anyaicliremote.feature.ui.ChatUiState
 import com.anyaicliremote.feature.ui.ChatViewModel
 import com.anyaicliremote.feature.ui.components.ChatBlockItem
-import com.anyaicliremote.feature.ui.components.InteractionSheetActions
-import com.anyaicliremote.feature.ui.components.InteractionSheet
-import com.anyaicliremote.feature.ui.components.ChildAgentStrip
-import com.anyaicliremote.feature.ui.components.SessionStatusBar
 import com.anyaicliremote.feature.ui.components.ChatComposer
 import com.anyaicliremote.feature.ui.components.ChatComposerActions
 import com.anyaicliremote.feature.ui.components.ChatComposerState
+import com.anyaicliremote.feature.ui.components.ChildAgentStrip
 import com.anyaicliremote.feature.ui.components.FloatingToolStatus
+import com.anyaicliremote.feature.ui.components.InteractionSheet
+import com.anyaicliremote.feature.ui.components.InteractionSheetActions
+import com.anyaicliremote.feature.ui.components.SessionStatusBar
 import com.anyaicliremote.feature.ui.components.WorkspaceFilePickerDialog
 import kotlinx.coroutines.launch
 
@@ -266,4 +266,3 @@ private fun buildChatRows(blocks: List<ChatBlock>, busy: Boolean): List<ChatRow>
     }
     return blocks.map { block -> ChatRow.Block(block, block.id == liveAssistantId) }
 }
-

@@ -4,6 +4,39 @@ Every top-level item is one reviewable feature boundary and one Git commit. Do n
 unfinished top-level features in one commit. Mark an item complete only after its required tests pass,
 then include the checkbox update in that feature's commit.
 
+Status as of `eb3caa4` on `main`: items **0–6 and 8 are done**. Do not reopen them, re-split
+coordinators, or re-implement ask / status / tool-content / permission / feedback. The only
+open work is the **Open** section below.
+
+## Open
+
+- [x] **Follow-scroll collapse** (not a new product surface)
+  - Required behavior: while streaming, the list stays pinned to the latest bottom; user
+    scroll-away pauses follow; the jump-to-bottom control resumes it. One owner per client,
+    same behavior on Android and iOS.
+  - Android now uses one `follow` flag with `LazyColumn(reverseLayout = true)`: streaming
+    pins index 0, a user drag pauses follow, and the jump-to-bottom action resumes it. The
+    controller, transcript-signature `snapshotFlow`, and spacer anchor are gone.
+  - Do not add another Coordinator / Controller / Effects type to satisfy the 600-line gate.
+
+- [x] **Device-live verification** (validation, not missing product; see `HANDOFF.md`)
+  - Tool cards show command output (not empty).
+  - Permission cards show the command in `toolCall.title`; iOS actually presents the sheet.
+  - Ask form: per-question notes, cancel, chat-about-this, skip; plan approve/cancel.
+  - Status bar: plan-mode badge; retry / model-switch notice if triggerable.
+  - Evidence: real Grok daemon on MuMu passed the five focused live cases; iOS Simulator
+    passed pairing, streaming, ask and plan flows plus a focused permission-card/command-title
+    probe. Retry/model-switch notices were not naturally triggerable.
+
+- [ ] **7. 最终发布**
+  - [ ] Run the complete Go/macOS/iOS/Android pipeline, privacy and legacy-brand scans, and final real Grok smoke test.
+  - [ ] Release signing/notarization and package signature verification happen last, when credentials are available.
+  - [ ] Clean historical private identifiers and rename the GitHub repository and local directory to `any-aicli-remote`, then verify the private remote.
+  - Do not start this item unless the user asks.
+  - Commit: `🚀 发布：准备 Any AI CLI Remote 开源版本`
+
+## Done
+
 - [x] **0. Provider 中立后端基线**
   - [x] Establish daemon-idle startup without creating, loading, or resuming sessions; provide per-session workspaces, Grok history, path isolation, secret handling, a public API that never directly forwards to terminal execution, and Go naming/source-size gates.
   - [x] Required evidence is limited to Go quality, lifecycle/session/reverse-security tests, private-identifier scans, and `git diff --check`; this item must not include macOS, iOS, or Android validation.
@@ -60,18 +93,11 @@ then include the checkbox update in that feature's commit.
   - [x] Android 先、iOS 后：实现 pending 交互 UI、ask 表单与 plan 预览/操作；客户端只消费中立 `session/interaction_request`，不解析 provider wrapper。
   - Commit: `✨ 聊天：新增结构化交互与计划确认`
 
-- [ ] **8. 扩展流式与交互 primitive（全部归一化）**
-  - 原则：客户端只消费 provider-neutral payload，**绝不解析 grok 原语**；能复用现有中立通道的复用，只在必需时新增一条中立方法。grok primitive 面见记忆/盘点：官方 session/update 扩展变体 ~50，仅少数对远程手机客户端有意义。
-  - 归一化落点：`tool_call_delta_chunk`→复用中立 tool-call 更新（append 语义）；`model_changed`/`model_auto_switched`→复用现有 ModelState 通道；`current_mode_update`+`retry_state`→新增一条中立 `session/status_update`（带 mode/retry 枚举）；`feedback_request`（通知式、带 app 层 request_id、应答走 `x.ai/feedback` 调用）→新增中立 feedback 交互通道（通知进 + 应答方法出）。
-  - [ ] Phase 1（不改契约）：Android ask 表单追平已发布的 iOS——`InteractionAnswer` 加 annotations（每题 notes）与 cancelAsk；加"先聊一下"（chat_about_this + partialAnswers）、"取消"、每题备注输入；两端补 `chat_about_this` 可达按钮。后端契约已支持，纯客户端。
-  - 复核后砍单：`tool_call_delta_chunk` 实为**工具入参**的 raw JSON 片段流（单独非合法 JSON），手机上是噪声非信号，`tool_call`/`tool_call_update` 帧已带有意义状态 → 不做（YAGNI）。`model_changed` 为 app 自身改 effort 所触发、app 已知 → 不单独做；仅 `model_auto_switched`（模型不可用自动切换）罕见但有值，降级为一条归一化系统提示，不铺新 ModelState 管线。
-  - [x] Phase 2（新增 1 条中立方法 `session/status_update`）：`current_mode_update`（上游 ACP 标准，客户端直读 → mode badge）+ `retry_state`（grok 私有，后端归一化 retrying/exhausted/failed + attempt/max/rateLimit → 状态行）+ `model_auto_switched`（grok 私有 → 中立 modelSwitch 通知）。后端在 `NormalizeAgentNotification` 前置 `normalizeStatusNotification` 拦 `session/update`、复用 `parseChildAgentEnvelope`，仅重写这两个私有扩展，其余透传（有 passthrough 测试钉住）。retry 字段按实测 camelCase + `type` 判别式读取。两端消费（SessionStatusBar mode 徽章 + 通知行）+ 协议测试（后端 grok 层、Android decoder、iOS mapper/formatter）。
-  - [x] Phase 4（feedback 默认拒绝，纯后端）：`feedback_request` 是 xAI 的评分/NPS 产品反馈漏斗（`ClientFeedbackInput` 带 rating_type thumbs/stars/nps，挂 `x.ai/rollout/survey` / engagement tier，dismissible），与"操控远程 agent"无关，**不做客户端 UI**。改为 daemon 检测即默认拒绝：新增 provider 接口 `AutoDeclineNotification`，grok 认出 session/update 里的 `feedback_request`，向 agent 回 `x.ai/feedback/dismiss {session_id, request_id}`（hub 赋 id、代际校验、复用 replyAgentForGeneration），并**不转发给客户端**；缺 id 时仍丢弃。协议测试覆盖 dismiss 构造、缺 id 仍丢弃、非 feedback 不拦。
-  - 每 Phase：后端先（含协议测试）→ Android → iOS；grok 私有解析只在 `internal/provider/grok`，中立契约在 `internal/provider`。
-  - Commit：每 Phase 一个 `✨` 提交。
-
-- [ ] **7. 最终发布**
-  - [ ] Run the complete Go/macOS/iOS/Android pipeline, privacy and legacy-brand scans, and final real Grok smoke test.
-  - [ ] Release signing/notarization and package signature verification happen last, when credentials are available.
-  - [ ] Clean historical private identifiers and rename the GitHub repository and local directory to `any-aicli-remote`, then verify the private remote.
-  - Commit: `🚀 发布：准备 Any AI CLI Remote 开源版本`
+- [x] **8. 扩展流式与交互 primitive（全部归一化）**
+  - 原则：客户端只消费 provider-neutral payload，**绝不解析 grok 原语**；能复用现有中立通道的复用，只在必需时新增一条中立方法。
+  - [x] Phase 1（不改契约）：Android ask 表单追平已发布的 iOS——`InteractionAnswer` 加 annotations（每题 notes）与 cancelAsk；加"先聊一下"（chat_about_this + partialAnswers）、"取消"、每题备注输入。`7dfe4d8`
+  - [x] YAGNI：`tool_call_delta_chunk`（工具入参碎片，手机上是噪声）和 `model_changed`（app 自己改 effort，已知）不做。
+  - [x] Phase 2：中立 `session/status_update`（`retry_state` / `model_auto_switched`）+ ACP `current_mode_update` 直读。`ac81bb8`
+  - [x] 顺手修复：工具 `content` 按 ACP 数组解析（`13bf7b9`）；权限卡写入标准 `toolCall.title` 且 iOS 识别 `session/request_permission`（`dd75f1e`）。
+  - [x] Phase 4：`feedback_request` 不做客户端 UI；daemon `AutoDeclineNotification` 回 `x.ai/feedback/dismiss`，不转发。`fc590e6`
+  - 真机验收已完成，见上方 Open / `HANDOFF.md`。不要把 item 8 当未做功能重开。

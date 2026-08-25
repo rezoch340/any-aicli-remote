@@ -393,3 +393,15 @@ is macOS and Linux; renameio's documented platform support does not include Wind
 - Decision: 复用 acp-go-sdk 的 JSON-RPC envelope 与 Plan 展示类型；ask/exit 的 `_x.ai/*` 私有请求/应答为 Grok 私有形状，ACP 无对应模型，故只在 Grok adapter 内手写最小双向映射（入：`NormalizeInteractionRequest`；出：`DenormalizeInteractionResponse`）。中立 typed interaction 放 `internal/provider/interaction.go`，私有解析只放 `internal/provider/grok/interaction.go`。不新增依赖。
 - Boundary: 客户端只消费中立 `session/interaction_request`，绝不解析 `_x.ai/*` wrapper。Hub 复用 permission 的 session 定向 + first-answer-wins + 断连取消路径；交互失败一律回 JSON-RPC error（与 agent “重连后重现”行为一致），不回 permission 形状的 cancelled 结果。未知/畸形请求或应答 fail closed。
 - Boundary: 同一份数据在 grok wire 里有三种拼写（tool_call 用 `multi_select`，tool_call_update 与反向请求用 `multiSelect`）；适配器只认反向请求侧的 `multiSelect`，展示帧的 tool_call 由既有 session/update 透传，不复制第二份解析。
+
+## Grok CLI 权限模式覆盖
+
+- Checked: 本机 Grok CLI `1.0.5` 的 `grok --permission-mode default agent --help` 接受顶层 `--permission-mode`，且官方 `xai-org/grok-build` 权限文档说明 CLI 参数覆盖配置文件默认值。
+- Decision: 复用 Grok 官方 CLI 参数；守护进程 `AlwaysApprove=false` 显式传 `--permission-mode default`，`true` 保持 `agent --always-approve`，不修改用户 `config.toml`、`GROK_HOME` 或复制凭据。
+- Boundary: daemon typed option 必须确定性覆盖用户默认权限模式；transport secret 仍只通过环境变量传递。
+
+## Android transcript follow
+
+- Checked: GitHub [`Minis233/miniichat`](https://github.com/Minis233/miniichat) commit `33eddca` 的自然顺序消息列表与 latest-scroll 思路。
+- Decision: 未引入依赖；Android 复用 Compose `LazyColumn(reverseLayout = true)`，由页面内唯一 `follow` 状态控制 index 0 钉底、拖动暂停与跳底恢复。
+- Boundary: 禁止 FollowController、transcript-signature `snapshotFlow`、spacer anchor 或页面级零散滚动逻辑。

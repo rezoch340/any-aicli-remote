@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -132,6 +133,32 @@ func TestAgentCommandKeepsTransportSecretOutOfProcessArguments(testContext *test
 	}
 	if len(command.Environment) != 1 || command.Environment[0] != "GROK_AGENT_SECRET="+transportSecret {
 		testContext.Fatalf("transport secret environment = %#v", command.Environment)
+	}
+}
+
+func TestAgentCommandExplicitlyOverridesPermissionMode(testContext *testing.T) {
+	executablePath := filepath.Join(testContext.TempDir(), "grok")
+	if operationError := os.WriteFile(executablePath, []byte("#!/bin/sh\n"), 0o700); operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	launchConfiguration := providerapi.AgentLaunchConfiguration{Host: "127.0.0.1", Port: 2419}
+	defaultProvider := mustNew(testContext, Config{ExecutablePath: executablePath})
+	defaultCommand, operationError := defaultProvider.AgentCommand(launchConfiguration)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	expectedDefault := []string{"--permission-mode", "default", "agent", "--no-leader", "serve", "--bind", "127.0.0.1:2419"}
+	if !reflect.DeepEqual(defaultCommand.Arguments, expectedDefault) {
+		testContext.Fatalf("default permission arguments = %#v, expected %#v", defaultCommand.Arguments, expectedDefault)
+	}
+	approveProvider := mustNew(testContext, Config{ExecutablePath: executablePath, AlwaysApprove: true})
+	approveCommand, operationError := approveProvider.AgentCommand(launchConfiguration)
+	if operationError != nil {
+		testContext.Fatal(operationError)
+	}
+	expectedApprove := []string{"agent", "--always-approve", "--no-leader", "serve", "--bind", "127.0.0.1:2419"}
+	if !reflect.DeepEqual(approveCommand.Arguments, expectedApprove) {
+		testContext.Fatalf("always approve arguments = %#v, expected %#v", approveCommand.Arguments, expectedApprove)
 	}
 }
 

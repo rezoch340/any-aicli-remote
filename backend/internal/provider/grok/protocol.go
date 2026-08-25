@@ -36,9 +36,9 @@ func (providerInstance *GrokProvider) AgentCommand(configuration providerapi.Age
 	if operationError != nil {
 		return providerapi.AgentCommand{}, operationError
 	}
-	arguments := []string{"agent"}
+	arguments := []string{"--permission-mode", "default", "agent"}
 	if providerInstance.alwaysApprove {
-		arguments = append(arguments, "--always-approve")
+		arguments = []string{"agent", "--always-approve"}
 	}
 	if providerInstance.leader {
 		arguments = append(arguments, "--leader")

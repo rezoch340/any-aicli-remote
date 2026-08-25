@@ -1,15 +1,8 @@
 # Any AI CLI Remote Engineering Rules
 
-## Product boundaries
-
-- The product is **Any AI CLI Remote**. New generic code, protocol names, build products, and documentation must not use a provider name as the product name.
-- The daemon core is provider-neutral. Provider-specific commands, RPC method names, session layouts, configuration paths, and parsing belong under that provider's adapter.
-- The first supported provider is `grok`. Do not add speculative implementations for other providers.
-- Starting the daemon may start an idle provider service, but must not create, load, or resume a session.
-- Pairing a device never selects a workspace. A workspace belongs to a session: an existing session restores its persisted workspace, and a new session supplies one explicitly.
-- File, terminal, Git, skills, and project operations must resolve through the active session workspace. There is no daemon-global project root.
-
 ## Reuse is a quality gate
+
+This is the first gate. It outranks shipping speed, local convenience, and default agent helpfulness. A change that invents a parallel helper, parser, protocol model, transport, or dependency without a recorded reuse search fails, even if tests pass. Do not start coding until the search below is done. "I will reuse later" is a failure.
 
 - Search for an existing implementation before adding one. Reuse the canonical helper or extend it instead of copying its logic.
 - Before writing non-trivial infrastructure, search the relevant official SDK, package registry, and maintained open-source projects. The required order is: reuse repository code, use the platform or language standard library, adopt a compatible maintained library, and only then write the smallest missing adapter.
@@ -25,7 +18,59 @@
 - Prefer real module boundaries during architecture and refactoring: layer cohesive responsibilities such as model, transport, storage, domain, feature, and composition rather than merely splitting files while retaining one monolithic module.
 - Put each shared capability in one owning module and expose the narrow public API required by its consumers. Do not scatter or duplicate helpers, protocol parsing, storage, networking, or UI orchestration across modules; consolidate scattered responsibilities before extending them.
 - Avoid over-modularization as well: do not create a fragment module or wrapper without an independent responsibility or a real second caller.
+- A facade whose methods only forward to another type is not a split. The 600-line gate is failed by that wrapper, not satisfied by it. Move the logic; do not add `Coordinator` / `Controller` / `Scope` / `Effects` types to keep a file under the limit.
+- Transcript follow is list behavior: pin to the latest item while following, pause on user drag, resume on the jump-to-bottom control. One owner per client, same behavior on Android and iOS. Do not add a FollowController, EffectsState, transcript-hash `snapshotFlow`, spacer anchor item, or per-widget scroll calls.
 - Backward-compatibility reads and migrations must be centralized. New writes use only the current Any AI CLI Remote names.
+
+## Current product
+
+This repository is past the bootstrap. It started as a Grok-branded remote and is now **Any AI CLI Remote**: a provider-neutral Go daemon, a macOS launcher, and native Android/iOS chat clients. Grok is the first Provider adapter, not the product name. Do not restart items 0–6. Do not scaffold a second Provider. Do not treat leftover Grok Remote identifiers as the current brand.
+
+Shipped native surfaces (Android and iOS, unless noted):
+
+- Device pairing: `anyaicliremote://pair` QR/deep link, Keychain/Keystore, multi-device profiles, disconnect-and-return. Pairing never chooses a workspace.
+- macOS launcher: device name, daemon/provider ports, bind and optional public host, start/stop of the owned daemon, pairing QR. No workspace picker.
+- Session lifecycle: list from `GET /api/sessions`, new session with explicit `cwd`, load existing session and restore its persisted workspace, history messages, cancel, reconnect without replaying provider history on top of already-loaded chat.
+- Chat transcript: streaming assistant/user chunks, thinking, Markdown, code, tables, tool cards with ACP `content` arrays, file attachments via workspace `GET /api/fs/list`, effort via `POST /api/effort`.
+- Permission cards: reverse `session/request_permission` (match any method containing `permission`). The daemon copies the command into standard `toolCall.title`; clients never read `_meta`.
+- Child-Agent strip: provider-neutral `session/child_agent_update`. Cards are typed lifecycle state only — no prompt, output, or error text.
+- Structured interaction: provider-neutral `session/interaction_request` for ask-question and exit-plan. Ask form supports options, Other, per-question notes, cancel, chat-about-this, and skip. Plan sheet supports approve / cancel / abandon.
+- Session status bar: ACP `current_mode_update` as a mode badge; Grok `retry_state` and `model_auto_switched` normalized to `session/status_update`.
+
+Daemon REST that exists but is **not** a native client feature: Git, Skills list, loops, voice/TTS, room, stack control, project context. Those routes are daemon/compat surfaces. Do not invent phone UI for them unless the user asks.
+
+Client-origin Provider RPC allowlist: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/set_model`, remote ping. Unknown methods fail closed. Reverse file/terminal/permission/interaction travel only Provider → Hub → clients.
+
+Clients consume only provider-neutral or ACP-standard payloads. Grok private wire (`_x.ai/*`, `x.ai/tool`, namespaced `_meta` keys, `subagent_*`, `feedback_request`) is absorbed in `internal/provider/grok`. Adding a client parser for those shapes fails review.
+
+## Current progress
+
+HEAD on `main` is `eb3caa4`. This is not a greenfield repo. Work from this snapshot.
+
+Already on `main` — do not rebuild, re-split, or re-implement:
+
+- TODO items 0–6, including the 4A/4B coordinator split. Android `ChatViewModel` and iOS `ChatStore` already forward into coordinators. That split is finished. Do not add another coordinator.
+- Item 8 code: Android ask-form parity (`7dfe4d8`), `session/status_update` (`ac81bb8`), tool-call `content` arrays (`13bf7b9`), permission title + iOS permission-method match (`dd75f1e`), daemon auto-dismiss of `feedback_request` (`fc590e6`).
+- YAGNI already decided: no `tool_call_delta_chunk` UI, no extra pipeline for `model_changed`.
+
+Still open — see `TODO.md` **Open** only:
+
+- Item 7 (release). Do not start it unless the user asks.
+
+Follow-scroll collapse and device-live verification are complete. Android uses one list-owned
+follow flag with `reverseLayout`; do not restore a FollowController, transcript-signature
+`snapshotFlow`, spacer anchor, throttling, or a second follow stack.
+
+`TODO.md` items 0–6 and 8 are done. Do not reopen them.
+
+## Product boundaries
+
+- The product is **Any AI CLI Remote**. New generic code, protocol names, build products, and documentation must not use a provider name as the product name.
+- The daemon core is provider-neutral. Provider-specific commands, RPC method names, session layouts, configuration paths, and parsing belong under that provider's adapter.
+- The first supported provider is `grok`. Do not add speculative implementations for other providers.
+- Starting the daemon may start an idle provider service, but must not create, load, or resume a session.
+- Pairing a device never selects a workspace. A workspace belongs to a session: an existing session restores its persisted workspace, and a new session supplies one explicitly.
+- File, terminal, Git, skills, and project operations must resolve through the active session workspace. There is no daemon-global project root.
 
 ## Compatibility and open-source hygiene
 
@@ -42,8 +87,8 @@
 ## Code quality
 
 - Use descriptive identifiers. New variable and declaration names shorter than three characters fail the quality gate, except established protocol or platform terms such as `ID`, `URL`, `RPC`, `HTTP`, `OS`, `UI`, and `IP`.
-- Hand-written Go source files must not exceed 600 physical lines. A larger file fails the quality gate and must be split by cohesive responsibility within the existing package; comments, regions, generated wrappers, or duplicate helper layers are not substitutes for a real split.
-- Hand-written production Kotlin and Swift source files must not exceed 600 physical lines; Detekt and SwiftLint must report zero issues. Do not use baselines or file-wide suppression; only the narrowest platform-boundary suppression is allowed when accompanied by an explanatory comment.
+- Hand-written Go source files must not exceed 600 physical lines. A larger file fails the quality gate and must be split by cohesive responsibility within the existing package; comments, regions, generated wrappers, forwarding facades, or duplicate helper layers are not substitutes for a real split.
+- Hand-written production Kotlin and Swift source files must not exceed 600 physical lines; Detekt and SwiftLint must report zero issues. Do not use baselines or file-wide suppression; only the narrowest platform-boundary suppression is allowed when accompanied by an explanatory comment. The 4A/4B split already happened. Do not split again to game this limit.
 - Protocols, mappings, reducers, and compatibility/migration behavior must reuse one canonical implementation rather than parallel copies.
 - Do not wait until a file reaches the hard limit to separate unrelated lifecycle, transport, protocol, persistence, platform, and domain responsibilities. File splitting must preserve one canonical implementation rather than copying shared logic into each file.
 - Magic values and scattered operational defaults are forbidden. Ports, bind or public addresses, executable paths, timeouts, retry or polling intervals, resource limits, retention periods, feature switches, and other deployment- or behavior-tunable values must live in the canonical typed configuration or durable settings store, not inline at call sites.
@@ -83,16 +128,21 @@
   parallel or let an App infer an unfinished backend contract.
 - Child Agents must return the changed files, commands run, and evidence of acceptance. The
   primary model reviews that evidence and performs the final validation and commit.
+- Do not spawn a child Agent for a one-file UI bug, a flicker, a scroll-follow fix, or a
+  live-test failure. Do that in the primary workspace immediately. Delegation is for a
+  bounded implementation after the contract is frozen, not for iterating a broken owner.
+- Writing `HANDOFF.md` or checking a TODO box is not a substitute for the failing client
+  fix. Do not skip the failing platform by running a different stack's E2E.
 
-- `TODO.md` is the delivery checklist. Work through its top-level items in order unless the user explicitly changes the order.
-- Hard gate: until TODO items 0–3 are all completed, checked off, and committed, do not modify Android or iOS client code. The only exception is an explicit user instruction changing the order.
-- After the backend+Launcher E2E contract is frozen, implement clients in this order: Android first, then iOS.
+- `TODO.md` is the remaining delivery checklist, not a greenfield roadmap. Items 0–6 are done. Do not reopen them, and do not block Android or iOS edits on those old gates.
+- The remaining top-level milestone is item 7 (release). Item 8 is done on `main`. Follow-scroll collapse and device-live verification are the open client work in `TODO.md`, not a new feature to design.
+- New cross-stack work still goes backend first, then Android, then iOS. That is the order for a new contract, not a reason to rebuild the clients.
 - Release signing and notarization remain exclusively in the final release item.
 - Prioritize functionality and Debug/Simulator E2E validation. Release signing, notarization, and package
   signature verification belong only to the final release TODO; platform-required local ad-hoc signing may be
   used for launch tests but must not be presented as Release signing.
 - Dependencies inside each feature are sequential gates, not parallel suggestions. For every cross-stack feature, finish and validate the backend domain model, protocol, persistence, and tests before editing Android, iOS, macOS, or other app code that consumes it.
-- Never make an app guess an unfinished backend contract. Freeze the typed backend payload and lifecycle semantics first; only then implement clients against that verified contract, in the order recorded by `TODO.md`.
+- Never make an app guess an unfinished backend contract. Freeze the typed backend payload and lifecycle semantics first; only then implement clients against that verified contract.
 - Every top-level TODO item is one coherent feature boundary and one Git commit. Do not mix unrelated features in a commit, and do not split one feature into noisy checkpoint commits merely to record progress.
 - Every commit subject must start with one relevant emoji followed by a concise Chinese description, for example `✨ 配置：建立统一守护进程配置`. English-only subjects and conventional-commit-only subjects fail review; product names and technical proper nouns may remain in their canonical spelling inside the Chinese description.
 - Mark a TODO item complete only after its stated validation passes. Include that checkbox update in the same feature commit; never pre-check unfinished work.

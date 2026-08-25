@@ -55,6 +55,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -292,7 +293,7 @@ private fun ToolMessage(block: ChatBlock) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp).height(38.dp)
             .clip(RoundedCornerShape(19.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-            .clickable { detail = true }.padding(horizontal = 12.dp),
+            .clickable { detail = true }.testTag("tool-row").padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(toolIcon(block.title), null, tint = color, modifier = Modifier.size(16.dp))
@@ -308,7 +309,7 @@ private fun ToolMessage(block: ChatBlock) {
     }
     if (detail) {
         ModalBottomSheet(onDismissRequest = { detail = false }) {
-            Column(Modifier.fillMaxWidth().padding(20.dp)) {
+            Column(Modifier.fillMaxWidth().padding(20.dp).testTag("tool-detail")) {
                 Text(block.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 Text(block.detail.ifEmpty { "暂无工具输出" }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
@@ -335,8 +336,16 @@ private fun PermissionMessage(block: ChatBlock, viewModel: ChatViewModel) {
             Text(block.text)
             Spacer(Modifier.height(12.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                block.options.forEach { option -> Button(onClick = { viewModel.answerPermission(block, option.id) }) { Text(option.label) } }
-                OutlinedButton(onClick = { viewModel.answerPermission(block, null) }) { Text("取消") }
+                block.options.forEach { option ->
+                    Button(
+                        onClick = { viewModel.answerPermission(block, option.id) },
+                        modifier = Modifier.testTag("permission-option-${option.id}"),
+                    ) { Text(option.label) }
+                }
+                OutlinedButton(
+                    onClick = { viewModel.answerPermission(block, null) },
+                    modifier = Modifier.testTag("permission-cancel"),
+                ) { Text("取消") }
             }
         }
     }

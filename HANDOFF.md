@@ -2,47 +2,52 @@
 
 ## 当前状态
 
-- `main` 与 `origin/main` 均位于 `fc590e6`，本会话 6 个 commit 已推送，工作区干净。
-- item 0–6 完成；**item 8（扩展与归一化）本会话全做完**；item 7（最终发布）待做。
-- 三端**静态门禁 + 单测全绿**（Go quality/vet、Android unit/detekt/lint/assemble、iOS SwiftLint + 93 unit），但 UI 改动**未真机验证**——这是提交后的硬门槛，见下「待验」。
-- 运行态：daemon 已关闭（2421/2419 无监听）。真机 E2E 前须按现有流程启动 daemon 再 health check，配对密钥在钥匙串（服务 `com.anyaicliremote.launcher`、账户 `pairing-secret`），不要依赖固定 PID 或临时文件。
+- item 0–6 和 8 已完成；跟随滚动收口与设备真实链路验证也已完成。
+- 唯一未开始的顶层工作是 item 7（最终发布）。未明确要求前不要开始签名、公证、仓库改名或发布清理。
+- 本轮不修改 iOS 产品代码；iOS 权限卡通过一次临时 focused UI probe 验证，临时测试代码已移除。
 
-## 本会话 6 个 commit（都已推送）
+## 本轮完成内容
 
-1. `7dfe4d8` item 8 Phase 1：Android ask 表单追平已发布的 iOS——`InteractionAnswer` 加 annotations（每题 notes）与 CancelAsk；ask 表单加自由文本框（一物两用：Other 答案 + 备注）、plan 模式露「先聊一下」「跳过」、常驻「取消」「提交」。后端契约早支持，纯客户端。
-2. `ac81bb8` item 8 Phase 2：grok 私有 `retry_state`、`model_auto_switched` 后端归一化为中立 `session/status_update`；`current_mode_update`（ACP 标准）客户端直读。两端 `SessionStatusBar`（mode 徽章 + 通知行）。归一化在 `internal/provider/grok/status.go`（复用 `parseChildAgentEnvelope`），中立契约 `internal/provider/status.go`。
-3. `13bf7b9` **工具输出 bug**：ACP 的 `ToolCall(Update).content` 是**数组**，两端却当对象读 → `ls` 等输出永丢。归一化修：daemon `normalizeToolContent`（grok/toolcontent.go）把 grok 扁平项 `{type:text,text}` 包成 ACP 标准 `{type:content,content:{...}}`；两端 `upsertTool` 遍历数组取文本。**对 claude 也曾坏，非 grok 特有**（据 zed ACP 规范 tool_call.rs + claude-agent-acp 源码确认）。
-4. `dd75f1e` **权限双修**：①卡片看不到命令——命令在 grok 私有 `_meta["x.ai/tool"]`（ACP 禁止客户端读 _meta），故 daemon `ClassifyReverseRequest` 提取命令（grok/permission.go）、hub `applyPermissionTitle` 写进标准 `toolCall.title`，两端只读标准字段。②**iOS 权限从不识别**——`isPermissionRequest` 只认 `permission/request`，但 ACP 标准是 `session/request_permission`，导致 grok 权限卡在 iOS 从不弹；改为 `contains("permission")`，与 daemon/Android 一致。回包 `{outcome:{outcome:selected,optionId}}` 早已正确。
-5. `fc590e6` item 8 Phase 4：`feedback_request` 是 xAI 评分/NPS 漏斗，不做客户端 UI。新增 provider 接口 `AutoDeclineNotification`，grok 认出即回 `x.ai/feedback/dismiss {session_id,request_id}`（hub 赋 id/代际校验/复用 replyAgentForGeneration）且不转发客户端。
-6. `43892de` TODO 记录。
+### Android 跟随滚动
 
-## 待验（真机，接手第一件事，按此顺序）
+- `LazyColumn(reverseLayout = true)`，最新消息位于 index 0。
+- 页面内唯一 `follow` 状态控制跟随：流式更新时钉底，用户拖动后暂停，回到底部或点击跳底按钮恢复。
+- 已移除 FollowController、transcript-signature `snapshotFlow`、spacer anchor 与分散滚动调用。
 
-装 MuMu（`adb connect 127.0.0.1:5555`、`adb reverse tcp:2421 tcp:2421`、`./gradlew installDebug`）或 iOS 模拟器，接**真实 grok daemon**：
+### Grok 权限模式
 
-1. **工具输出**（最该验，本会话核心修复）：发「列出当前目录文件」等会触发 bash/ls 的 prompt，确认工具卡**显示命令输出**（此前为空）。
-2. **权限卡**：触发需授权的命令（写文件/危险命令），确认卡片**显示要执行的命令**（如「bash: ls -la」）而非笼统「需要你的确认」；**iOS 尤其要验权限卡是否弹出**（此前从不弹）；点允许/拒绝确认生效。
-3. **ask 表单**：`/plan` + 让 grok 先 `ask_user_question`，验每题备注框、取消、先聊一下、提交。
-4. **状态徽章**：计划模式徽章、弱网下的重试提示（能触发的话）。
-5. 回归：`./scripts/android-connected-e2e.sh`、`IOS_SIMULATOR_ID=<uuid> ./scripts/ios-live-daemon-e2e.sh`。
+- `AlwaysApprove=false` 时显式使用 `grok --permission-mode default agent ...`，确定性覆盖用户配置中的静默批准模式。
+- `AlwaysApprove=true` 时仍使用 `grok agent --always-approve ...`。
+- 配对与 transport secret 仍不进入进程参数。
 
-## 归一化原则（勿违背）
+### 真实链路验证
 
-- 客户端只消费 provider-neutral / ACP-标准 payload，**绝不解析 grok 私有 wire 或 `_meta` 内命名空间键**（ACP 明令禁止解读 _meta）。grok 偏差一律在 `internal/provider/grok` 适配器边界吸收。
-- 本会话所有修复都据 grok 开源（`xai-org/grok-build`）与 zed ACP 规范（`agentclientprotocol/agent-client-protocol`）+ claude 适配（`agentclientprotocol/claude-agent-acp`）交叉确认；改 wire 前先读源码，别猜。
+Android / MuMu + 真实 Grok daemon：
 
-## 验收命令
+- fixture connected E2E 通过，包含长流式跟随、拖动暂停和跳底恢复。
+- focused live 5 项通过：配对、工具输出、权限命令标题、ask 取消、plan mode + notes + chat-about-this。
+
+iOS Simulator + 真实 Grok daemon：
+
+- 配对、流式跟随、结构化 ask、plan 修改/放弃均通过。
+- focused 权限 probe 通过：`需要确认` 卡片实际出现，并显示 `.ios-live-permission-marker` 命令标题。
+- 完整 live 脚本中的 child-agent 用例本次未触发子 Agent，导致 1/5 失败；其余 4/5 通过。该失败不涉及本轮跟滚或权限改动，未借机改动 child-agent 产品功能。
+- retry / model auto-switch 状态在本地真实链路中未自然触发。
+
+## 已运行验证
 
 ```sh
 ./scripts/check-go-quality.sh
-cd android && ./gradlew testDebugUnitTest detekt lintDebug assembleDebug
+cd android && ./gradlew testDebugUnitTest detekt assembleDebug
 ./scripts/check-native-source-quality.sh
-cd ios && xcodebuild test -project AnyAICLIRemote.xcodeproj -scheme AnyAICLIRemote -destination 'platform=iOS Simulator,id=<uuid>' -only-testing:AnyAICLIRemoteTests
+./scripts/android-connected-e2e.sh
+IOS_SIMULATOR_ID=8B82E4CF-9A2B-4803-A973-28B929ED1F00 ./scripts/ios-live-daemon-e2e.sh
+# 另运行 focused iOS permission-card probe；通过后已移除临时测试代码。
 ```
 
-## 不要做
+## 后续边界
 
-- 不让客户端解析 `_x.ai/*` / `x.ai/tool` 等私有字段；不把职责堆回 ViewModel/ChatStore/reducer。
-- iOS 不手改 generated project：先改 `project.yml` 再 `xcodegen generate`（本会话新增 .swift 已按目录 glob 纳入）。
-- 不升级依赖；不创建/切换 worktree。
-- 命名门禁：Go 禁止 <3 字符局部名（用 `isObject`/`hasMeta` 等）；iOS SwiftLint 禁集合字面量尾逗号。
+- 不恢复 FollowController、transcript hash/signature `snapshotFlow`、spacer anchor、throttle 或第二套跟随状态。
+- 客户端不得解析 `_x.ai/*`、`x.ai/tool` 或 `_meta` 命名空间键。
+- iOS 工程设置只通过 `project.yml` + `xcodegen generate` 修改。
+- item 7 仍需用户明确要求后才能开始。
