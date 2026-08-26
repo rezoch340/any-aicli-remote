@@ -3,7 +3,7 @@
 # Any AI CLI Remote
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go backend quality](https://github.com/rezoch340/any-aicli-remote/actions/workflows/go-backend-quality.yml/badge.svg)](https://github.com/rezoch340/any-aicli-remote/actions/workflows/go-backend-quality.yml)
+[![Go backend quality gate](https://img.shields.io/badge/Go%20backend-quality%20gate-00ADD8?logo=go&logoColor=white)](https://github.com/rezoch340/any-aicli-remote/actions/workflows/go-backend-quality.yml)
 ![iOS 17+](https://img.shields.io/badge/iOS-17%2B-000000?logo=apple)
 ![Android SDK 35+](https://img.shields.io/badge/Android-SDK%2035%2B-3DDC84?logo=android&logoColor=white)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?logo=apple)
@@ -14,6 +14,32 @@ Any AI CLI Remote is open-source software. It pairs native iOS and Android clien
 
 > [!IMPORTANT]
 > This repository does not publish a notarized macOS binary. The macOS launcher is built locally and uses ad-hoc signing by default.
+
+## Screenshots
+
+### iOS
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/ios-device-list.png" width="280" alt="Paired iOS device and online status"><br><sub>Device pairing and online status</sub></td>
+    <td align="center"><img src="docs/images/ios-streaming-chat.png" width="280" alt="Streaming Grok response on iOS"><br><sub>Streaming response and thinking state</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/ios-rich-response.png" width="280" alt="Rich text Grok response on iOS"><br><sub>Markdown-rich response rendering</sub></td>
+    <td align="center"><img src="docs/images/ios-session-reopen.png" width="280" alt="Reopened iOS chat session"><br><sub>Session history restoration</sub></td>
+  </tr>
+</table>
+
+### Android
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/android-device-list.png" width="280" alt="Paired Android device and online status"><br><sub>Connected device in the MuMu emulator</sub></td>
+    <td align="center"><img src="docs/images/android-plan-mode.png" width="280" alt="Grok Plan Mode on Android"><br><sub>Live Grok session and Plan Mode</sub></td>
+  </tr>
+</table>
+
+These screens were captured against a real Any AI CLI Remote daemon and Grok provider using synthetic test content. They contain no pairing keys or private filesystem paths.
 
 ## Overview
 

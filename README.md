@@ -3,7 +3,7 @@
 # Any AI CLI Remote
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go backend quality](https://github.com/rezoch340/any-aicli-remote/actions/workflows/go-backend-quality.yml/badge.svg)](https://github.com/rezoch340/any-aicli-remote/actions/workflows/go-backend-quality.yml)
+[![Go backend quality gate](https://img.shields.io/badge/Go%20backend-quality%20gate-00ADD8?logo=go&logoColor=white)](https://github.com/rezoch340/any-aicli-remote/actions/workflows/go-backend-quality.yml)
 ![iOS 17+](https://img.shields.io/badge/iOS-17%2B-000000?logo=apple)
 ![Android SDK 35+](https://img.shields.io/badge/Android-SDK%2035%2B-3DDC84?logo=android&logoColor=white)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?logo=apple)
@@ -14,6 +14,32 @@ Any AI CLI Remote 是一个源代码开放的项目。它由原生 iOS、Android
 
 > [!IMPORTANT]
 > 本仓库目前不发布经过公证（notarized）的 macOS 二进制文件。macOS 启动器需要在本地构建，默认使用 ad-hoc 签名。
+
+## 界面预览
+
+### iOS
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/ios-device-list.png" width="280" alt="iOS 已配对设备与在线状态"><br><sub>设备配对与在线状态</sub></td>
+    <td align="center"><img src="docs/images/ios-streaming-chat.png" width="280" alt="iOS Grok 流式回复"><br><sub>Grok 流式回复与思考过程</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/ios-rich-response.png" width="280" alt="iOS 富文本回复"><br><sub>Markdown 富文本渲染</sub></td>
+    <td align="center"><img src="docs/images/ios-session-reopen.png" width="280" alt="iOS 会话恢复"><br><sub>历史会话恢复与继续对话</sub></td>
+  </tr>
+</table>
+
+### Android
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/android-device-list.png" width="280" alt="Android 已配对设备与在线状态"><br><sub>MuMu 模拟器中的设备连接</sub></td>
+    <td align="center"><img src="docs/images/android-plan-mode.png" width="280" alt="Android Grok Plan Mode"><br><sub>真实 Grok 会话与 Plan Mode</sub></td>
+  </tr>
+</table>
+
+以上客户端画面均来自连接真实 Any AI CLI Remote daemon 与 Grok Provider 的验证流程；截图使用合成测试内容，不包含配对密钥或私人路径。
 
 ## 概览
 
