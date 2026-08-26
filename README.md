@@ -1,34 +1,46 @@
 # Any AI CLI Remote
 
-Any AI CLI Remote 是面向 AI CLI 的原生远程客户端与独立 Go daemon。核心只负责设备配对、
-连接、会话生命周期、安全工作区、历史索引和反向 RPC；CLI 的启动方式、协议 method、
-模型能力与磁盘会话格式全部由 Provider adapter 实现。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go backend quality](https://github.com/rezoch340/any-aicli-remote/actions/workflows/go-backend-quality.yml/badge.svg)](https://github.com/rezoch340/any-aicli-remote/actions/workflows/go-backend-quality.yml)
+![iOS 17+](https://img.shields.io/badge/iOS-17%2B-000000?logo=apple)
+![Android SDK 35+](https://img.shields.io/badge/Android-SDK%2035%2B-3DDC84?logo=android&logoColor=white)
+![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-000000?logo=apple)
 
-当前只实现 `grok` Provider。通用层已经按多 Provider 边界设计，但不会为尚未接入的 CLI
-堆放占位实现。
+**Native mobile clients and a standalone Go daemon for remotely using an AI CLI on your own machine.**
 
-## 设计约束
+Any AI CLI Remote is open-source software. It pairs native iOS and Android clients with a host-side daemon that owns authentication, provider lifecycle, session metadata, workspace isolation, history indexing, and reverse RPC for files and terminals. The core is designed around provider adapters, but **grok is currently the only implemented provider**; there are no placeholder integrations for other CLIs.
 
-- 启动 daemon 只会拉起空闲的 Provider 服务，不创建、加载或恢复任何会话。
-- 设备配对只保存服务地址、设备名与密钥，不选择工作区。
-- 打开已有会话时，从会话元数据恢复该会话自己的工作区。
-- 新建会话时，客户端必须明确提交工作区。
-- 文件、终端、Git、Skills 与项目操作始终从当前会话解析工作区，不存在 daemon 全局工作区。
-- 通用核心不包含 Grok 的 RPC method、命令行参数或 `~/.grok` 磁盘布局。
-- 新数据只写 Any AI CLI Remote 标识；旧 Grok Remote 标识仅在集中式兼容读取和迁移代码中出现。
+> [!IMPORTANT]
+> This repository does not publish a notarized macOS binary. The macOS launcher is built locally and uses ad-hoc signing by default.
 
-## 架构
+## Overview
+
+The daemon runs beside the AI CLI, while the mobile app connects over HTTP and WebSocket. Pairing records a server URL, device name, and key; it does not select a workspace. A workspace belongs to a session: existing sessions restore their recorded workspace, and new sessions must provide one explicitly.
+
+The project keeps provider-specific commands, RPC methods, capabilities, and on-disk history formats inside provider adapters. Shared code handles cross-provider concerns such as authentication, session routing, canonical path validation, pagination, time normalization, and compatibility migration.
+
+## Features
+
+- Native SwiftUI client for iOS and Jetpack Compose client for Android.
+- Streaming chat with Markdown, code blocks, tables, thinking, tool calls, permission prompts, and child-agent status.
+- Multiple saved device profiles, QR/deep-link pairing, session history, session creation/loading/cancellation, and reconnect handling.
+- Session-scoped workspace access for files, terminals, Git, skills, and project operations.
+- A Go daemon with authenticated REST/WebSocket transport and provider lifecycle management.
+- A macOS SwiftUI launcher that embeds and manages the arm64 daemon.
+- Grok active and archived history indexing with deterministic pagination and defensive path validation.
+
+## Architecture
 
 ```text
-Native iOS / Android
-        │ HTTP + WebSocket
-        ▼
+Native iOS / Android clients
+            │ HTTP + WebSocket
+            ▼
 Any AI CLI Remote daemon
-  ├─ authentication / pairing
-  ├─ provider registry
-  ├─ session metadata + workspace isolation
+  ├─ authentication and pairing
+  ├─ provider registry and lifecycle
+  ├─ session metadata and workspace isolation
   ├─ history pagination
-  ├─ reverse file / terminal RPC
+  ├─ reverse file and terminal RPC
   └─ Provider + ProtocolAdapter
              └─ grok
                  ├─ grok agent serve lifecycle
@@ -36,28 +48,39 @@ Any AI CLI Remote daemon
                  └─ active + archived history reader
 ```
 
-聊天界面采用原生 SwiftUI 与 Jetpack Compose，支持流式消息、Markdown、代码块、表格、
-thinking、工具调用、权限确认、多设备资料、会话历史、新建/加载/取消与断线返回。
-
-## 目录
-
 ```text
-any-aicli-remote/
-├── backend/    # 通用 Go daemon 与 Provider adapters
-├── docs/       # 通用传输协议和 Provider 边界
-├── ios/        # SwiftUI 客户端
-├── android/    # Kotlin + Jetpack Compose 客户端
-├── macos/      # SwiftUI 一键启动器
-└── scripts/    # 构建与强制质量门禁
+backend/    Go daemon and provider adapters
+docs/       Transport protocol and provider-boundary documentation
+ios/        SwiftUI client
+android/    Kotlin and Jetpack Compose client
+macos/      SwiftUI launcher
+scripts/    Build and mandatory quality gates
 ```
 
-根目录的 [`AGENTS.md`](AGENTS.md) 是工程质量约束：能复用的逻辑必须复用，跨 Provider
-的 registry、路径包含校验、时间归一化、分页和兼容迁移只能存在一份实现。依赖和已有方案的
-评估记录在 [`docs/DEPENDENCY_DECISIONS.md`](docs/DEPENDENCY_DECISIONS.md)。
+The daemon starts provider services idle; it does not create, load, or resume a session at startup. There is no daemon-global workspace. Provider-specific Grok RPC methods, command-line arguments, and `~/.grok` storage knowledge remain in the Grok adapter.
 
-## Go 后端
+The Grok history adapter scans both `~/.grok/sessions` and `~/.grok/archived_sessions`. It builds lightweight metadata from `summary.json` and reads `chat_history.jsonl` only when messages are requested. Results are ordered by last activity and paginated; deterministic rules handle duplicate active/archive entries, timestamps, rich-text extraction, and damaged records. Source paths are canonicalized, constrained to allowed history roots, and checked against the requested on-disk session ID.
 
-要求：Go 1.25+，以及已安装并登录的 Grok CLI。
+See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the transport contract and [`docs/DEPENDENCY_DECISIONS.md`](docs/DEPENDENCY_DECISIONS.md) for dependency decisions.
+
+## Security model
+
+- Only the shallow `/health` endpoint is public. `/health/deep` is authenticated because it can trigger provider connection or startup probes.
+- REST requests use `X-Any-AI-CLI-Remote-Key`; WebSocket connections authenticate with `/ws?key=...`.
+- Pairing keys are stored through platform credential storage and supplied to the daemon through credential storage, `*-secret-file` options, or environment variables. The daemon intentionally does not accept plaintext secret command-line arguments that would leak through process listings or shell history.
+- File and history paths are canonicalized and checked against the session workspace or permitted provider history roots before access.
+- New data uses Any AI CLI Remote identifiers. Legacy Grok Remote identifiers are limited to centralized compatibility reads and migration code.
+- The launcher only stops processes whose ownership it can establish.
+
+Treat the daemon as access to the selected workspaces and CLI account. Bind it only to interfaces you intend to expose, protect transport appropriately for your network, keep pairing material secret, and review permission prompts before approving them.
+
+Please report vulnerabilities privately through the repository's [Security Advisories](https://github.com/rezoch340/any-aicli-remote/security/advisories/new), not through a public issue. See [SECURITY.md](SECURITY.md).
+
+## Quick start
+
+### 1. Build the Go daemon
+
+Requirements: Go 1.25+ and an installed, authenticated Grok CLI.
 
 ```bash
 cd backend
@@ -65,97 +88,44 @@ cd backend
 go build -trimpath -o ../dist/any-aicli-remote-daemon ./cmd/any-aicli-remote-daemon
 ```
 
-`check-go-quality.sh` 会执行命名门禁、Go 单文件 600 行上限、`gofmt`、全量测试、race
-detector 与 `go vet`。非专有名词的声明名少于三个字符、使用禁用缩写或把多个职责堆进
-超长 Go 文件时会直接失败；GitHub Actions 运行同一门禁。
+The quality gate runs naming and source-size checks, `gofmt`, all Go tests, the race detector, and `go vet`. GitHub Actions runs the same script.
 
-直接启动（默认 daemon `2421`，Grok Provider 服务 `2419`）：
+### 2. Start the daemon
 
 ```bash
 ./dist/any-aicli-remote-daemon \
   --public-host https://remote.example.com:24443
 ```
 
-这里没有 `--cwd`：daemon 启动不拥有工作区。首次启动会在 `~/.any-aicli-remote/` 准备
-运行数据和配对材料，并可只读迁移旧目录中的兼容数据。Provider 启动后仍为空闲状态，
-直到客户端选择已有会话或携带工作区新建会话。
+Defaults are port `2421` for the daemon and `2419` for the Grok provider service. First launch prepares runtime data and pairing material under `~/.any-aicli-remote/`. There is no `--cwd`; a client supplies the workspace when creating a session.
 
 ```bash
 curl http://127.0.0.1:2421/health
-curl -H 'X-Any-AI-CLI-Remote-Key: <pairing-key>' http://127.0.0.1:2421/health/deep
+curl -H 'X-Any-AI-CLI-Remote-Key: <pairing-key>' \
+  http://127.0.0.1:2421/health/deep
 ```
 
-只有浅层 `/health` 公开。会触发 Provider 连接/启动探测的 `/health/deep` 必须鉴权。配对密钥
-通过系统凭据存储、`*-secret-file` 或环境变量传入；daemon 不接受会把密钥暴露到进程列表和
-shell history 的明文 secret 参数。
+### 3. Pair a client
 
-## Grok 历史
-
-Grok adapter 的历史模型参考
-[CC-Switch](https://github.com/farion1231/cc-switch) 的 Provider 设计：同时扫描
-`~/.grok/sessions` 与 `~/.grok/archived_sessions`，从 `summary.json` 建立轻量元数据索引，
-需要消息时才读取对应的 `chat_history.jsonl`。
-
-统一历史元数据包含 Provider ID、session ID、标题、摘要、工作区、创建/最后活动时间、
-来源路径和恢复命令。结果按最后活动时间倒序分页；活动与归档重复项、时间戳格式、富文本
-提取和损坏记录都由确定性规则处理。所有来源路径会先 canonicalize，再验证位于允许的
-Provider history roots 内，并校验磁盘 session ID 与请求一致。
-
-## macOS 一键启动器
-
-要求：Apple Silicon Mac、Xcode 16+、Go 1.25+ 与
-[XcodeGen](https://github.com/yonaskolb/XcodeGen)。
-
-```bash
-./scripts/build-macos-app.sh
-open "dist/Any AI CLI Remote Launcher.app"
-```
-
-启动器会嵌入 arm64 Go daemon。界面只配置设备名称、daemon/Provider 端口、bind 地址、
-可选公网地址和 Provider 权限模式（`每次询问` / `自动允许`）；它不会选择工作区。首次启动会
-自动生成 `~/.any-aicli-remote/config.json`。启动成功后显示二维码，关闭启动器时只停止本次
-启动器能够证明所有权的进程。
-
-默认构建使用 macOS 平台的 ad-hoc 签名：先签 daemon，再把它嵌入标准的
-`Contents/MacOS` 位置，最后由 Xcode 签外层 App；脚本会对 daemon 和 App 执行
-`codesign --verify --deep --strict`。纯 ad-hoc 签名没有 provisioning profile 授权的
-Keychain access group，因此启动器只在系统返回 `errSecMissingEntitlement` 时改用 SecItem
-file-based Keychain；其他 Keychain 错误不会被吞掉。更新 ad-hoc 构建后，macOS 可能再次
-要求确认该 App 访问登录钥匙串。
-
-若需使用 Data Protection Keychain，提供含 Keychain access group 权限的签名身份、Team 和
-provisioning profile；脚本会启用仓库内的 macOS entitlements：
-
-```bash
-MACOS_CODE_SIGN_IDENTITY="Apple Development: Example" \
-MACOS_DEVELOPMENT_TEAM="TEAMID" \
-MACOS_PROVISIONING_PROFILE_SPECIFIER="Any AI CLI Remote Development" \
-./scripts/build-macos-app.sh
-```
-
-默认产物是本机运行构建，不是 Developer ID/notarized 分发包。
-
-## 设备配对
-
-HTTP 配对地址通常为：
+A pairing URL normally has this form:
 
 ```text
 http://<server-ip>:2421/?key=<pairing-key>&auto=1
 ```
 
-二维码使用：
+The QR code uses:
 
 ```text
 anyaicliremote://pair?url=<encoded-base-url>&key=<encoded-key>&name=<encoded-device-name>
 ```
 
-深链没有 `cwd`。客户端将每台设备保存为独立资料，把 key 写入平台安全存储，冷启动先显示
-设备列表；选择设备后才连接并读取会话。WebSocket 使用 `/ws?key=...`，REST 使用
-`X-Any-AI-CLI-Remote-Key`。旧 scheme/header 只用于升级兼容。
+The deep link intentionally contains no workspace. Each device is stored as a separate profile, with its key in platform secure storage.
 
-## iOS
+## Platform setup
 
-要求：Xcode 16+、iOS 17+。
+### iOS
+
+Requirements: Xcode 16+, XcodeGen, and an iOS 17+ target.
 
 ```bash
 cd ios
@@ -163,47 +133,50 @@ xcodegen generate
 open AnyAICLIRemote.xcodeproj
 ```
 
-旧 bundle ID 与 `com.anyaicliremote.app` 也属于不同 iOS App 容器。Keychain 兼容层会尽力
-复制旧配对密钥，但旧 UserDefaults 中的设备 URL/名称不能保证跨沙箱读取；完整无感迁移需要
-先由旧 bundle 的过渡版本把设备元数据导出到共享 Keychain/App Group。
+For an unsigned generic Simulator build:
 
-## Android
+```bash
+xcodebuild -project AnyAICLIRemote.xcodeproj \
+  -scheme AnyAICLIRemote \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
+```
 
-要求：Android Studio、JDK 17+、Android SDK 35+。
+### Android
+
+Requirements: Android Studio, JDK 17+, and Android SDK 35+.
 
 ```bash
 cd android
 ./gradlew testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-APK 输出为 `android/app/build/outputs/apk/debug/app-debug.apk`，可使用：
+The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+### macOS launcher
+
+Requirements: an Apple Silicon Mac, Xcode 16+, Go 1.25+, XcodeGen, and an installed/authenticated Grok CLI.
 
 ```bash
-adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+./scripts/build-macos-app.sh
+open "dist/Any AI CLI Remote Launcher.app"
 ```
 
-将 Android `applicationId` 从旧包名迁移为 `com.anyaicliremote.app` 后，Android 会把它视为
-新应用；系统不允许新包直接读取旧包的私有沙箱。仓库内的偏好迁移覆盖同一沙箱可访问的
-旧格式，真正跨 applicationId 的已安装数据迁移需要旧版本先提供显式导出通道。
+The launcher embeds the arm64 daemon and configures the device name, daemon/provider ports, bind address, optional public URL, and provider permission mode. It does not choose a workspace.
 
-## 原生客户端验收
+The default local build is ad-hoc signed. The script signs the daemon before embedding it, signs the outer app through Xcode, and verifies both with `codesign --verify --deep --strict`. Because an ad-hoc signature has no provisioning-profile Keychain access group, the launcher falls back to its file-based SecItem Keychain only when the system returns `errSecMissingEntitlement`; other Keychain errors remain visible. Updating an ad-hoc build may cause macOS to ask again for login-keychain access.
 
-统一验收入口按 **Android first → iOS** 顺序执行：先运行 Android 单元测试、Debug 构建和
-lint，再生成 iOS 工程、执行未签名 generic simulator 构建，最后在具体 Simulator 上运行
-签名测试。Android connected E2E 默认不运行；需要设备时显式 opt-in：
+A properly provisioned development identity, team, and profile can enable the repository's Data Protection Keychain entitlements, but **no Developer ID-signed or notarized macOS distribution is published by this project**.
+
+## Development
+
+Run the complete local validation entry point on macOS:
 
 ```bash
-./scripts/android-connected-e2e.sh
-
-cd ios
-xcodegen generate
-xcodebuild -project AnyAICLIRemote.xcodeproj -scheme AnyAICLIRemote \
-  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
-xcodebuild -project AnyAICLIRemote.xcodeproj -scheme AnyAICLIRemote \
-  -destination 'platform=iOS Simulator,id=<simulator-id>' test
+./scripts/build-all.sh
 ```
 
-完整入口示例：
+It builds the macOS launcher and Go daemon, runs the Go quality gate, runs Android static analysis/unit tests/debug builds/lint, generates the iOS project, checks native source quality, builds for a generic iOS Simulator, and runs iOS Simulator tests. Connected Android E2E is opt-in:
 
 ```bash
 RUN_ANDROID_CONNECTED_E2E=1 \
@@ -211,21 +184,29 @@ IOS_SIMULATOR_DESTINATION='platform=iOS Simulator,id=<simulator-id>' \
 ./scripts/build-all.sh
 ```
 
-不设置 `RUN_ANDROID_CONNECTED_E2E=1` 时，`build-all.sh` 不会连接设备运行 Android E2E。
-iOS 测试使用本地 Simulator 签名以访问 Keychain；Release signing 仍属于最终发布流程。
-
-需要验收真实 daemon 的 iOS UI 流程时，先将可信 Launcher 的 pairing key 放入 Simulator
-剪贴板，再使用专用 scheme：
+For backend-only changes, run:
 
 ```bash
-xcodebuild -project ios/AnyAICLIRemote.xcodeproj \
-  -scheme AnyAICLIRemoteLiveE2E \
-  -destination 'platform=iOS Simulator,id=<simulator-id>' \
-  -only-testing:AnyAICLIRemoteUITests test
+./scripts/check-go-quality.sh
 ```
 
-正常 `AnyAICLIRemote` scheme 不注入 live 测试开关，因此不会运行真实 daemon 用例。
+When changing behavior shared by platforms, update and test the backend, iOS, and Android representations together. Preserve the provider boundary: reusable policy belongs in shared code, while Grok-specific protocol and storage behavior belongs in the Grok adapter.
+
+## Contributing
+
+Issues and pull requests are welcome:
+
+- [Open an issue](https://github.com/rezoch340/any-aicli-remote/issues/new/choose) for a reproducible bug or a focused feature proposal.
+- [Open a pull request](https://github.com/rezoch340/any-aicli-remote/compare) for a reviewed, tested change.
+
+Before contributing, read [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md), and [SECURITY.md](SECURITY.md). Please search existing issues first, keep changes focused, reuse existing cross-stack abstractions, add relevant tests, and avoid including pairing keys, user content, private paths, or other sensitive data in reports and fixtures.
+
+## Project status
+
+Any AI CLI Remote is under active development. The source is open, and the current implementation supports **grok only**. The provider boundary is designed for future adapters, but support for any other AI CLI should not be assumed until an implementation is merged and documented.
+
+Platform clients and the macOS launcher are built from source. There is currently no notarized macOS binary release.
 
 ## License
 
-本项目采用 [MIT License](LICENSE)。
+Licensed under the [MIT License](LICENSE).

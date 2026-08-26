@@ -1,0 +1,56 @@
+name: Feature request
+description: Propose a focused improvement to Any AI CLI Remote
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an improvement. The only implemented provider is currently grok; please do not assume unimplemented providers or features already exist.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and did not find the same proposal.
+          required: true
+        - label: This request does not disclose a security vulnerability or sensitive data.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What concrete problem would this solve, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest useful behavior, including the expected user experience.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Primary scope
+      options:
+        - Go daemon/backend
+        - iOS client
+        - Android client
+        - macOS launcher
+        - Cross-platform
+        - Documentation or tooling
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Note current workarounds or simpler alternatives.
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architecture and security considerations
+      description: Explain any provider-boundary, workspace-isolation, authentication, privacy, or cross-stack implications.

@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a reproducible problem in Any AI CLI Remote
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Search existing issues first. Do not include pairing keys, credentials, user transcripts, or private filesystem paths.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: This is not a security vulnerability. Security reports belong in a private advisory.
+          required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Go daemon/backend
+        - iOS client
+        - Android client
+        - macOS launcher
+        - Build or development tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem summary
+      description: Describe the problem and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic values and provide the smallest reliable reproduction.
+      placeholder: |
+        1. Start...
+        2. Pair...
+        3. Open...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include relevant OS, toolchain, app revision, Go/JDK/Xcode versions, and device or simulator details. Redact private paths and identifiers.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Optional. Remove secrets, pairing URLs, user content, and private paths before posting.
