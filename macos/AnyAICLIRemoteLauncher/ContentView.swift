@@ -93,6 +93,21 @@ struct ContentView: View {
           }
         }
         .disabled(!controller.configurationEditable)
+
+        VStack(alignment: .leading, spacing: 7) {
+          Text("Provider 权限模式").font(.caption).foregroundStyle(.secondary)
+          Picker("Provider 权限模式", selection: $settings.providerAlwaysApprove) {
+            Text("每次询问").tag(false)
+            Text("自动允许").tag(true)
+          }
+          .pickerStyle(.segmented)
+          .labelsHidden()
+          Text("自动允许会让 Provider 无需确认即可执行工具请求。")
+            .font(.caption)
+            .foregroundStyle(settings.providerAlwaysApprove ? .orange : .secondary)
+        }
+        .disabled(!controller.configurationEditable)
+
         HStack {
           Text(controller.configurationPath).font(.caption.monospaced()).textSelection(.enabled)
           Spacer()

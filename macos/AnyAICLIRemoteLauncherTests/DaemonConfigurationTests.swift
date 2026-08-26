@@ -31,7 +31,7 @@ final class DaemonConfigurationTests: XCTestCase {
         let location = temporaryConfigurationURL()
         let runner = FakeDaemonRunner(responses: [showResult(), successResult(), successResult(), showResult()])
         let store = DaemonConfigurationStore(runner: runner, configurationURL: location)
-        _ = try store.save(editable: DaemonEditableConfiguration(bindAddress: "127.0.0.1", daemonPort: 4242, publicHost: "remote.example", agentPort: 4243))
+        _ = try store.save(editable: DaemonEditableConfiguration(bindAddress: "127.0.0.1", daemonPort: 4242, publicHost: "remote.example", agentPort: 4243, providerAlwaysApprove: false))
         XCTAssertEqual(runner.calls.map(\.arguments), [
             ["config", "show", "--config", location.path],
             ["config", "validate", "--config", location.path, "--input", "-"],
@@ -48,6 +48,80 @@ final class DaemonConfigurationTests: XCTestCase {
         let data = Data("{\"version\":1,\"network\":{\"bind\":\"0.0.0.0\",\"port\":2421},\"agent\":{\"port\":2419}}".utf8)
         let configuration = try CanonicalDaemonConfiguration(data: data)
         XCTAssertEqual(try configuration.editable.publicHost, "")
+    }
+
+    func testProviderAlwaysApproveFalseRoundTrip() throws {
+        var configuration = try CanonicalDaemonConfiguration(
+            data: providerApprovalDocument(value: "false")
+        )
+        var editable = try configuration.editable
+        XCTAssertFalse(editable.providerAlwaysApprove)
+
+        editable.providerAlwaysApprove = false
+        try configuration.apply(editable)
+
+        let roundTripped = try CanonicalDaemonConfiguration(data: configuration.serializedData())
+        XCTAssertFalse(try roundTripped.editable.providerAlwaysApprove)
+        XCTAssertEqual(try providerOptions(in: configuration)["always-approve"] as? String, "false")
+    }
+
+    func testProviderAlwaysApproveTrueRoundTrip() throws {
+        var configuration = try CanonicalDaemonConfiguration(
+            data: providerApprovalDocument(value: "true")
+        )
+        var editable = try configuration.editable
+        XCTAssertTrue(editable.providerAlwaysApprove)
+
+        editable.providerAlwaysApprove = true
+        try configuration.apply(editable)
+
+        let roundTripped = try CanonicalDaemonConfiguration(data: configuration.serializedData())
+        XCTAssertTrue(try roundTripped.editable.providerAlwaysApprove)
+        XCTAssertEqual(try providerOptions(in: configuration)["always-approve"] as? String, "true")
+    }
+
+    func testMissingProviderApprovalConfigurationDefaultsFalse() throws {
+        let configurations = [
+            documentData(),
+            Data("{\"version\":1,\"network\":{\"bind\":\"0.0.0.0\",\"port\":2421},\"agent\":{\"port\":2419},\"provider\":{\"id\":\"grok\",\"options\":{}}}".utf8),
+            Data("{\"version\":1,\"network\":{\"bind\":\"0.0.0.0\",\"port\":2421},\"agent\":{\"port\":2419}}".utf8),
+        ]
+
+        for data in configurations {
+            XCTAssertFalse(try CanonicalDaemonConfiguration(data: data).editable.providerAlwaysApprove)
+        }
+    }
+
+    func testInvalidProviderAlwaysApproveStringIsRejected() throws {
+        let configuration = try CanonicalDaemonConfiguration(
+            data: providerApprovalDocument(value: "yes")
+        )
+        XCTAssertThrowsError(try configuration.editable) { error in
+            XCTAssertEqual(
+                error as? DaemonConfigurationError,
+                .invalidField("provider.options.always-approve")
+            )
+        }
+    }
+
+    func testSavingProviderApprovalPreservesOtherProviderOptionsAndUnrelatedConfiguration() throws {
+        var configuration = try CanonicalDaemonConfiguration(
+            data: providerApprovalDocument(value: "false")
+        )
+        var editable = try configuration.editable
+        editable.providerAlwaysApprove = true
+        try configuration.apply(editable)
+
+        let object = try JSONSerialization.jsonObject(
+            with: configuration.serializedData()
+        ) as? [String: Any]
+        let provider = object?["provider"] as? [String: Any]
+        let options = provider?["options"] as? [String: Any]
+        XCTAssertEqual(provider?["id"] as? String, "grok")
+        XCTAssertEqual(options?["always-approve"] as? String, "true")
+        XCTAssertEqual(options?["model"] as? String, "grok-4")
+        XCTAssertEqual((object?["tuning"] as? [String: Any])?["custom"] as? String, "keep")
+        XCTAssertEqual(object?["unrelated"] as? String, "preserved")
     }
 
     func testInvalidConfigurationShapesAreRejected() throws {
@@ -153,6 +227,16 @@ final class DaemonConfigurationTests: XCTestCase {
 
     private func documentData() -> Data {
         Data("{\"version\":1,\"network\":{\"bind\":\"0.0.0.0\",\"port\":2421,\"public_host\":\"\"},\"agent\":{\"port\":2419,\"stop_on_exit\":false},\"provider\":{\"id\":\"grok\"},\"tuning\":{\"history\":{\"max_bytes\":100}}}".utf8)
+    }
+
+    private func providerApprovalDocument(value: String) -> Data {
+        Data("{\"version\":1,\"network\":{\"bind\":\"0.0.0.0\",\"port\":2421,\"public_host\":\"\"},\"agent\":{\"port\":2419},\"provider\":{\"id\":\"grok\",\"options\":{\"always-approve\":\"\(value)\",\"model\":\"grok-4\"}},\"tuning\":{\"custom\":\"keep\"},\"unrelated\":\"preserved\"}".utf8)
+    }
+
+    private func providerOptions(in configuration: CanonicalDaemonConfiguration) throws -> [String: Any] {
+        let object = try JSONSerialization.jsonObject(with: configuration.serializedData()) as? [String: Any]
+        let provider = object?["provider"] as? [String: Any]
+        return provider?["options"] as? [String: Any] ?? [:]
     }
 
     private func showResult() -> DaemonCommandResult { DaemonCommandResult(standardOutput: documentData(), standardError: Data(), terminationStatus: 0) }

@@ -88,7 +88,8 @@ final class DaemonController: ObservableObject {
           bindAddress: settings.bindAddress,
           daemonPort: settings.daemonPort,
           publicHost: settings.publicHost,
-          agentPort: settings.agentPort))
+          agentPort: settings.agentPort,
+          providerAlwaysApprove: settings.providerAlwaysApprove))
       try settings.loadDraft(from: document)
       try rebuildClient()
       appendLog("配置已保存")

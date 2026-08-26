@@ -9,6 +9,7 @@ final class LauncherSettings: ObservableObject {
   @Published var agentPort: Int
   @Published var bindAddress: String
   @Published var publicHost: String
+  @Published var providerAlwaysApprove: Bool
   @Published private(set) var isConfigurationLoaded: Bool
   @Published var deviceName: String {
     didSet { defaults.set(deviceName, forKey: LauncherPreferenceKeys.deviceName) }
@@ -23,6 +24,7 @@ final class LauncherSettings: ObservableObject {
     agentPort = 0
     bindAddress = ""
     publicHost = ""
+    providerAlwaysApprove = false
     isConfigurationLoaded = false
     deviceName =
       defaults.string(forKey: LauncherPreferenceKeys.deviceName)
@@ -48,6 +50,7 @@ final class LauncherSettings: ObservableObject {
     agentPort = editable.agentPort
     bindAddress = editable.bindAddress
     publicHost = editable.publicHost
+    providerAlwaysApprove = editable.providerAlwaysApprove
     isConfigurationLoaded = true
   }
 }

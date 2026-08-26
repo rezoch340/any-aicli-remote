@@ -28,6 +28,7 @@ struct DaemonEditableConfiguration: Equatable {
     var daemonPort: Int
     var publicHost: String
     var agentPort: Int
+    var providerAlwaysApprove: Bool
 }
 
 struct CanonicalDaemonConfiguration: Equatable {
@@ -50,11 +51,21 @@ struct CanonicalDaemonConfiguration: Equatable {
         get throws {
             let network = try dictionary(named: "network")
             let agent = try dictionary(named: "agent")
+            let provider = try optionalDictionary(named: "provider")
+            let providerOptions = try optionalDictionary(
+                in: provider,
+                key: "options",
+                field: "provider.options"
+            )
             return DaemonEditableConfiguration(
                 bindAddress: try string(in: network, field: "network.bind"),
                 daemonPort: try integer(in: network, field: "network.port"),
                 publicHost: optionalString(in: network, field: "network.public_host") ?? "",
-                agentPort: try integer(in: agent, field: "agent.port")
+                agentPort: try integer(in: agent, field: "agent.port"),
+                providerAlwaysApprove: try optionalBooleanString(
+                    in: providerOptions,
+                    field: "provider.options.always-approve"
+                ) ?? false
             )
         }
     }
@@ -62,12 +73,21 @@ struct CanonicalDaemonConfiguration: Equatable {
     mutating func apply(_ editable: DaemonEditableConfiguration) throws {
         var network = try dictionary(named: "network")
         var agent = try dictionary(named: "agent")
+        var provider = try optionalDictionary(named: "provider") ?? [:]
+        var providerOptions = try optionalDictionary(
+            in: provider,
+            key: "options",
+            field: "provider.options"
+        ) ?? [:]
         network["bind"] = editable.bindAddress
         network["port"] = editable.daemonPort
         network["public_host"] = editable.publicHost
         agent["port"] = editable.agentPort
+        providerOptions["always-approve"] = editable.providerAlwaysApprove ? "true" : "false"
+        provider["options"] = providerOptions
         rootObject["network"] = network
         rootObject["agent"] = agent
+        rootObject["provider"] = provider
     }
 
     mutating func apply(_ patch: DaemonEditableConfigurationPatch) throws {
@@ -95,6 +115,26 @@ struct CanonicalDaemonConfiguration: Equatable {
         return dictionary
     }
 
+    private func optionalDictionary(named key: String) throws -> [String: Any]? {
+        guard let value = rootObject[key] else { return nil }
+        guard let dictionary = value as? [String: Any] else {
+            throw DaemonConfigurationError.invalidField(key)
+        }
+        return dictionary
+    }
+
+    private func optionalDictionary(
+        in dictionary: [String: Any]?,
+        key: String,
+        field: String
+    ) throws -> [String: Any]? {
+        guard let value = dictionary?[key] else { return nil }
+        guard let nestedDictionary = value as? [String: Any] else {
+            throw DaemonConfigurationError.invalidField(field)
+        }
+        return nestedDictionary
+    }
+
     private func string(in dictionary: [String: Any], field: String) throws -> String {
         let key = field.split(separator: ".").last.map(String.init) ?? field
         guard let value = dictionary[key] else { throw DaemonConfigurationError.missingField(field) }
@@ -114,6 +154,22 @@ struct CanonicalDaemonConfiguration: Equatable {
         guard let numberValue = value as? NSNumber,
               CFGetTypeID(numberValue) != CFBooleanGetTypeID() else { throw DaemonConfigurationError.invalidField(field) }
         return numberValue.intValue
+    }
+
+    private func optionalBooleanString(
+        in dictionary: [String: Any]?,
+        field: String
+    ) throws -> Bool? {
+        let key = field.split(separator: ".").last.map(String.init) ?? field
+        guard let value = dictionary?[key] else { return nil }
+        guard let stringValue = value as? String else {
+            throw DaemonConfigurationError.invalidField(field)
+        }
+        switch stringValue {
+        case "true": return true
+        case "false": return false
+        default: throw DaemonConfigurationError.invalidField(field)
+        }
     }
 
     static func == (left: CanonicalDaemonConfiguration, right: CanonicalDaemonConfiguration) -> Bool {
