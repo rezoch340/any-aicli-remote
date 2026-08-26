@@ -11,6 +11,7 @@ ios/*.xcodeproj/xcuserdata/
 /dist/
 
 # Local device/UI verification artifacts
+/evidence/
 /.tmp-*
 /answer-stream
 /final-rich
