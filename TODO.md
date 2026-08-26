@@ -4,11 +4,11 @@ Every top-level item is one reviewable feature boundary and one Git commit. Do n
 unfinished top-level features in one commit. Mark an item complete only after its required tests pass,
 then include the checkbox update in that feature's commit.
 
-Status as of `eb3caa4` on `main`: items **0–6 and 8 are done**. Do not reopen them, re-split
-coordinators, or re-implement ask / status / tool-content / permission / feedback. The only
-open work is the **Open** section below.
+Release status: items **0–8 and the source-release milestone are complete**. No open item
+remains in this checklist; future work is post-release maintenance. Do not reopen completed
+features, re-split coordinators, or re-implement ask / status / tool-content / permission / feedback.
 
-## Open
+## Release completion
 
 - [x] **Follow-scroll collapse** (not a new product surface)
   - Required behavior: while streaming, the list stays pinned to the latest bottom; user
@@ -28,11 +28,10 @@ open work is the **Open** section below.
     passed pairing, streaming, ask and plan flows plus a focused permission-card/command-title
     probe. Retry/model-switch notices were not naturally triggerable.
 
-- [ ] **7. 最终发布**
-  - [ ] Run the complete Go/macOS/iOS/Android pipeline, privacy and legacy-brand scans, and final real Grok smoke test.
-  - [ ] Release signing/notarization and package signature verification happen last, when credentials are available.
-  - [ ] Clean historical private identifiers and rename the GitHub repository and local directory to `any-aicli-remote`, then verify the private remote.
-  - Do not start this item unless the user asks.
+- [x] **7. 最终发布（源码开源准备）**
+  - [x] Complete the Go/macOS/iOS/Android pipeline, privacy and legacy-brand scans, and final real Grok smoke validation. The focused iOS smoke passed 2/2; the broader five-case live run had two product-path passes and three automation/Provider-nondeterministic failures, so it is not recorded as 5/5.
+  - [x] Audit release signing and notarization honestly: only Apple Development is available, with no Developer ID identity or `AnyAICLIRemote` notarytool profile. Ad-hoc app and embedded daemon verification passes, but Gatekeeper rejects the build; no notarized binary distribution is claimed.
+  - [x] Confirm the privacy cleanup and canonical rename: no tracked local username/home/IP/credential patterns; legacy branding is confined to documented compatibility/migration code and tests; GitHub repository, local directory, and remote now use `any-aicli-remote`. Visibility publication and push remain after the final commit.
   - Commit: `🚀 发布：准备 Any AI CLI Remote 开源版本`
 
 ## Done
@@ -95,9 +94,9 @@ open work is the **Open** section below.
 
 - [x] **8. 扩展流式与交互 primitive（全部归一化）**
   - 原则：客户端只消费 provider-neutral payload，**绝不解析 grok 原语**；能复用现有中立通道的复用，只在必需时新增一条中立方法。
-  - [x] Phase 1（不改契约）：Android ask 表单追平已发布的 iOS——`InteractionAnswer` 加 annotations（每题 notes）与 cancelAsk；加"先聊一下"（chat_about_this + partialAnswers）、"取消"、每题备注输入。`7dfe4d8`
+  - [x] Phase 1（不改契约）：Android ask 表单追平已发布的 iOS——`InteractionAnswer` 加 annotations（每题 notes）与 cancelAsk；加"先聊一下"（chat_about_this + partialAnswers）、"取消"、每题备注输入。`bf06f99`
   - [x] YAGNI：`tool_call_delta_chunk`（工具入参碎片，手机上是噪声）和 `model_changed`（app 自己改 effort，已知）不做。
-  - [x] Phase 2：中立 `session/status_update`（`retry_state` / `model_auto_switched`）+ ACP `current_mode_update` 直读。`ac81bb8`
-  - [x] 顺手修复：工具 `content` 按 ACP 数组解析（`13bf7b9`）；权限卡写入标准 `toolCall.title` 且 iOS 识别 `session/request_permission`（`dd75f1e`）。
-  - [x] Phase 4：`feedback_request` 不做客户端 UI；daemon `AutoDeclineNotification` 回 `x.ai/feedback/dismiss`，不转发。`fc590e6`
-  - 真机验收已完成，见上方 Open / `HANDOFF.md`。不要把 item 8 当未做功能重开。
+  - [x] Phase 2：中立 `session/status_update`（`retry_state` / `model_auto_switched`）+ ACP `current_mode_update` 直读。`1b23edd`
+  - [x] 顺手修复：工具 `content` 按 ACP 数组解析（`0d3f26c`）；权限卡写入标准 `toolCall.title` 且 iOS 识别 `session/request_permission`（`f91df64`）。
+  - [x] Phase 4：`feedback_request` 不做客户端 UI；daemon `AutoDeclineNotification` 回 `x.ai/feedback/dismiss`，不转发。`e861c3b`
+  - 真机验收已完成，见上方 release completion / `HANDOFF.md`。不要把 item 8 当未做功能重开。

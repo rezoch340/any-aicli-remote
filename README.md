@@ -111,9 +111,10 @@ Provider history roots 内，并校验磁盘 session ID 与请求一致。
 open "dist/Any AI CLI Remote Launcher.app"
 ```
 
-启动器会嵌入 arm64 Go daemon。界面只配置设备名称、daemon/Provider 端口、bind 地址和
-可选公网地址；它不会选择工作区。启动成功后显示二维码，关闭启动器时只停止本次启动器
-能够证明所有权的进程。
+启动器会嵌入 arm64 Go daemon。界面只配置设备名称、daemon/Provider 端口、bind 地址、
+可选公网地址和 Provider 权限模式（`每次询问` / `自动允许`）；它不会选择工作区。首次启动会
+自动生成 `~/.any-aicli-remote/config.json`。启动成功后显示二维码，关闭启动器时只停止本次
+启动器能够证明所有权的进程。
 
 默认构建使用 macOS 平台的 ad-hoc 签名：先签 daemon，再把它嵌入标准的
 `Contents/MacOS` 位置，最后由 Xcode 签外层 App；脚本会对 daemon 和 App 执行
@@ -227,4 +228,4 @@ xcodebuild -project ios/AnyAICLIRemote.xcodeproj \
 
 ## License
 
-最终开源许可证尚未确定；当前 [`LICENSE`](LICENSE) 仅记录占位状态。
+本项目采用 [MIT License](LICENSE)。

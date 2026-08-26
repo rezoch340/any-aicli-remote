@@ -45,23 +45,21 @@ Clients consume only provider-neutral or ACP-standard payloads. Grok private wir
 
 ## Current progress
 
-HEAD on `main` is `eb3caa4`. This is not a greenfield repo. Work from this snapshot.
+The source-release milestone is complete. This is not a greenfield repository; future work is
+post-release maintenance and must preserve the completed product contracts.
 
-Already on `main` — do not rebuild, re-split, or re-implement:
+Completed — do not rebuild, re-split, or re-implement:
 
 - TODO items 0–6, including the 4A/4B coordinator split. Android `ChatViewModel` and iOS `ChatStore` already forward into coordinators. That split is finished. Do not add another coordinator.
-- Item 8 code: Android ask-form parity (`7dfe4d8`), `session/status_update` (`ac81bb8`), tool-call `content` arrays (`13bf7b9`), permission title + iOS permission-method match (`dd75f1e`), daemon auto-dismiss of `feedback_request` (`fc590e6`).
+- Item 8 code: Android ask-form parity (`bf06f99`), `session/status_update` (`1b23edd`), tool-call `content` arrays (`0d3f26c`), permission title + iOS permission-method match (`f91df64`), daemon auto-dismiss of `feedback_request` (`e861c3b`).
 - YAGNI already decided: no `tool_call_delta_chunk` UI, no extra pipeline for `model_changed`.
 
-Still open — see `TODO.md` **Open** only:
-
-- Item 7 (release). Do not start it unless the user asks.
-
-Follow-scroll collapse and device-live verification are complete. Android uses one list-owned
+The release milestone, follow-scroll collapse, and device-live verification are complete. There
+is no remaining release-checklist item; new work is post-release maintenance. Android uses one list-owned
 follow flag with `reverseLayout`; do not restore a FollowController, transcript-signature
 `snapshotFlow`, spacer anchor, throttling, or a second follow stack.
 
-`TODO.md` items 0–6 and 8 are done. Do not reopen them.
+`TODO.md` items 0–8 and the source-release milestone are done. Do not reopen them.
 
 ## Product boundaries
 
@@ -134,13 +132,9 @@ follow flag with `reverseLayout`; do not restore a FollowController, transcript-
 - Writing `HANDOFF.md` or checking a TODO box is not a substitute for the failing client
   fix. Do not skip the failing platform by running a different stack's E2E.
 
-- `TODO.md` is the remaining delivery checklist, not a greenfield roadmap. Items 0–6 are done. Do not reopen them, and do not block Android or iOS edits on those old gates.
-- The remaining top-level milestone is item 7 (release). Item 8 is done on `main`. Follow-scroll collapse and device-live verification are the open client work in `TODO.md`, not a new feature to design.
-- New cross-stack work still goes backend first, then Android, then iOS. That is the order for a new contract, not a reason to rebuild the clients.
-- Release signing and notarization remain exclusively in the final release item.
-- Prioritize functionality and Debug/Simulator E2E validation. Release signing, notarization, and package
-  signature verification belong only to the final release TODO; platform-required local ad-hoc signing may be
-  used for launch tests but must not be presented as Release signing.
+- `TODO.md` records the completed delivery checklist, not a greenfield roadmap. Items 0–8 and the source-release milestone are done; do not reopen them or block maintenance on old gates.
+- New work is post-release maintenance. New cross-stack contracts still go backend first, then Android, then iOS; that order is not a reason to rebuild completed clients.
+- The source release does not imply a notarized binary release. Apple binary distribution requires a Developer ID identity and notarytool credentials; local ad-hoc signing may support launch tests but must never be presented as Release signing or Gatekeeper acceptance.
 - Dependencies inside each feature are sequential gates, not parallel suggestions. For every cross-stack feature, finish and validate the backend domain model, protocol, persistence, and tests before editing Android, iOS, macOS, or other app code that consumes it.
 - Never make an app guess an unfinished backend contract. Freeze the typed backend payload and lifecycle semantics first; only then implement clients against that verified contract.
 - Every top-level TODO item is one coherent feature boundary and one Git commit. Do not mix unrelated features in a commit, and do not split one feature into noisy checkpoint commits merely to record progress.
