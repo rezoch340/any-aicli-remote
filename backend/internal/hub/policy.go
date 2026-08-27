@@ -13,6 +13,7 @@ type Policy struct {
 	ReadBufferBytes         int
 	WriteBufferBytes        int
 	MaxMessageBytes         int64
+	AgentMaxMessageBytes    int64
 	Heartbeat               time.Duration
 	ClientReadTimeout       time.Duration
 	WatcherEnsureInterval   time.Duration
@@ -43,7 +44,7 @@ func (policy Policy) Validate() error {
 	switch {
 	case policy.ReadBufferBytes <= 0 || policy.WriteBufferBytes <= 0:
 		return errors.New("hub buffers must be positive")
-	case policy.MaxMessageBytes <= 0:
+	case policy.MaxMessageBytes <= 0 || policy.AgentMaxMessageBytes <= 0:
 		return errors.New("hub maximum message bytes must be positive")
 	case policy.Heartbeat <= 0 || policy.ClientReadTimeout <= 0:
 		return errors.New("hub client timeouts must be positive")

@@ -57,7 +57,7 @@ func (hubInstance *Hub) Ensure(operationContext context.Context) error {
 		dialer := websocket.Dialer{HandshakeTimeout: hubInstance.policy.DialHandshake, EnableCompression: true}
 		connection, _, operationError := dialer.DialContext(operationContext, hubInstance.agentURL, nil)
 		if operationError == nil {
-			connection.SetReadLimit(hubInstance.policy.MaxMessageBytes)
+			connection.SetReadLimit(hubInstance.policy.AgentMaxMessageBytes)
 			agentGeneration, agentContext, published := hubInstance.publishAgent(connection)
 			if !published {
 				_ = connection.Close()

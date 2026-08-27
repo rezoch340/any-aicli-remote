@@ -17,7 +17,8 @@ func hubPolicy(tuning config.TuningDocument) hub.Policy {
 	document := tuning.Hub
 	return hub.Policy{
 		ReadBufferBytes: document.ReadBufferBytes, WriteBufferBytes: document.WriteBufferBytes,
-		MaxMessageBytes: document.MaxMessageBytes, Heartbeat: document.Heartbeat.Duration,
+		MaxMessageBytes: document.MaxMessageBytes, AgentMaxMessageBytes: document.AgentMaxMessageBytes,
+		Heartbeat:              document.Heartbeat.Duration,
 		ClientReadTimeout:      document.ClientReadTimeout.Duration,
 		WatcherEnsureInterval:  document.WatcherEnsureInterval.Duration,
 		StateBroadcastInterval: document.StateBroadcastInterval.Duration,

@@ -245,7 +245,8 @@ func (providerInstance *testProvider) DaemonNotification(kind providerapi.Notifi
 
 func testHubPolicy() Policy {
 	return Policy{
-		ReadBufferBytes: 64 << 10, WriteBufferBytes: 64 << 10, MaxMessageBytes: 16 << 20,
+		ReadBufferBytes: 64 << 10, WriteBufferBytes: 64 << 10,
+		MaxMessageBytes: 16 << 20, AgentMaxMessageBytes: 64 << 20,
 		Heartbeat: 20 * time.Second, ClientReadTimeout: 60 * time.Second,
 		WatcherEnsureInterval: 5 * time.Second, StateBroadcastInterval: 15 * time.Second,
 		EnsureAttempt: 12 * time.Second, ClientConnectEnsure: 15 * time.Second,

@@ -425,6 +425,7 @@ func TestNewStoresCustomPolicy(testInstance *testing.T) {
 	policy.PendingTimeout = 41 * time.Millisecond
 	policy.TerminalOutputBytes = 2048
 	policy.MaxMessageBytes = 4096
+	policy.AgentMaxMessageBytes = 8192
 	policy.WriteTimeout = 17 * time.Millisecond
 	policy.ControlWriteTimeout = 19 * time.Millisecond
 	providerInstance := &testProvider{workingDirectory: testInstance.TempDir()}
@@ -435,6 +436,9 @@ func TestNewStoresCustomPolicy(testInstance *testing.T) {
 	defer hubInstance.Close()
 	if hubInstance.pendingLimit != policy.PendingLimit || hubInstance.pendingClientLimit != policy.PendingClientLimit || hubInstance.pendingTimeout != policy.PendingTimeout {
 		testInstance.Fatalf("pending policy not preserved: %#v", hubInstance)
+	}
+	if hubInstance.policy.MaxMessageBytes != 4096 || hubInstance.policy.AgentMaxMessageBytes != 8192 {
+		testInstance.Fatalf("message limits not preserved: %#v", hubInstance.policy)
 	}
 	if hubInstance.terminals.defaultOutputBytes != policy.TerminalOutputBytes || hubInstance.upgrader.ReadBufferSize != policy.ReadBufferBytes || hubInstance.upgrader.WriteBufferSize != policy.WriteBufferBytes {
 		testInstance.Fatalf("hub policy not preserved: %#v", hubInstance.policy)

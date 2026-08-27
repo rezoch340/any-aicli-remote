@@ -126,6 +126,7 @@ type HubDocument struct {
 	ReadBufferBytes         int      `json:"read_buffer_bytes"`
 	WriteBufferBytes        int      `json:"write_buffer_bytes"`
 	MaxMessageBytes         int64    `json:"max_message_bytes"`
+	AgentMaxMessageBytes    int64    `json:"agent_max_message_bytes"`
 	Heartbeat               Duration `json:"heartbeat"`
 	ClientReadTimeout       Duration `json:"client_read_timeout"`
 	WatcherEnsureInterval   Duration `json:"watcher_ensure_interval"`

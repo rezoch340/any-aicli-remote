@@ -115,7 +115,7 @@ func TestLoadDocumentV0UsesProvidedHome(testingContext *testing.T) {
 
 func TestHubDocumentIncludesNotificationAndReverseReadDefaults(testingContext *testing.T) {
 	document := DefaultDocument(testingContext.TempDir())
-	if document.Tuning.Hub.NotificationEnsure.Duration.String() != "3s" || document.Tuning.Hub.ReverseReadBytes != 2_000_000 {
+	if document.Tuning.Hub.NotificationEnsure.Duration.String() != "3s" || document.Tuning.Hub.ReverseReadBytes != 2_000_000 || document.Tuning.Hub.AgentMaxMessageBytes != 64<<20 {
 		testingContext.Fatalf("hub defaults = %#v", document.Tuning.Hub)
 	}
 	encoded, operationError := json.Marshal(document)
@@ -128,6 +128,17 @@ func TestHubDocumentIncludesNotificationAndReverseReadDefaults(testingContext *t
 	}
 	if decoded.Tuning.Hub.NotificationEnsure != document.Tuning.Hub.NotificationEnsure || decoded.Tuning.Hub.ReverseReadBytes != document.Tuning.Hub.ReverseReadBytes {
 		testingContext.Fatalf("hub round trip = %#v", decoded.Tuning.Hub)
+	}
+}
+
+func TestNormalizeDocumentAddsAgentMessageLimitToExistingConfig(testingContext *testing.T) {
+	document := DefaultDocument(testingContext.TempDir())
+	document.Tuning.Hub.AgentMaxMessageBytes = 0
+
+	normalized := NormalizeDocument(document, testingContext.TempDir())
+
+	if normalized.Tuning.Hub.AgentMaxMessageBytes != 64<<20 {
+		testingContext.Fatalf("agent max message bytes = %d", normalized.Tuning.Hub.AgentMaxMessageBytes)
 	}
 }
 
