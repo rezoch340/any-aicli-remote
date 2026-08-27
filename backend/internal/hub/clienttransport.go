@@ -138,24 +138,15 @@ func (hubInstance *Hub) removeClient(client *clientConnection) {
 			hubInstance.pending[identifier] = pending
 		}
 	}
-	abandonedReverseRequests := make([]reverseRequestRoute, 0)
 	for routeKey, route := range hubInstance.reverseRequests {
 		if _, subscribed := route.clients[client]; !subscribed {
 			continue
 		}
 		delete(route.clients, client)
-		if len(route.clients) == 0 {
-			delete(hubInstance.reverseRequests, routeKey)
-			abandonedReverseRequests = append(abandonedReverseRequests, route)
-		} else {
-			hubInstance.reverseRequests[routeKey] = route
-		}
+		hubInstance.reverseRequests[routeKey] = route
 	}
 	count := len(hubInstance.clients)
 	hubInstance.stateMutex.Unlock()
-	for _, route := range abandonedReverseRequests {
-		hubInstance.replyReverseUnavailable(route.identifier, route.permission, "remote client disconnected", route.agentGeneration)
-	}
 	hubInstance.logger.Info("remote client disconnected", "clients", count)
 }
 

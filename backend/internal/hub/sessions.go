@@ -205,6 +205,23 @@ func (hubInstance *Hub) subscribeSessionClientLocked(client *clientConnection, p
 		hubInstance.sessionClients[cacheKey] = clients
 	}
 	clients[client] = struct{}{}
+	hubInstance.replayDetachedReverseRequestsLocked(client, cacheKey)
+}
+
+func (hubInstance *Hub) replayDetachedReverseRequestsLocked(client *clientConnection, cacheKey string) {
+	for routeKey, route := range hubInstance.reverseRequests {
+		if route.sessionKey != cacheKey || len(route.clients) != 0 || len(route.payload) == 0 {
+			continue
+		}
+		route.clients[client] = struct{}{}
+		hubInstance.reverseRequests[routeKey] = route
+		payload := append([]byte(nil), route.payload...)
+		go func() {
+			if operationError := client.send(payload); operationError != nil {
+				hubInstance.removeClient(client)
+			}
+		}()
+	}
 }
 
 func (hubInstance *Hub) scopeSessionParams(sessionID string, params map[string]any) map[string]any {

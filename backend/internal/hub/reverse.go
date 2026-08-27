@@ -21,6 +21,8 @@ type reverseRequestRoute struct {
 	agentGeneration uint64
 	clients         map[*clientConnection]struct{}
 	permission      bool
+	sessionKey      string
+	payload         []byte
 	// interactionRequest is set when the route is a structured interaction, so the
 	// client's neutral answer can be denormalized back to the provider shape
 	// before it is relayed to the agent.
@@ -168,10 +170,11 @@ func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID s
 	}
 
 	targetClients := make(map[*clientConnection]struct{})
+	routeSessionKey := ""
 	hubInstance.stateMutex.Lock()
 	if sessionID != "" && hubInstance.protocol != nil {
-		cacheKey := sessionCacheKey(hubInstance.protocol.ID(), sessionID)
-		for client := range hubInstance.sessionClients[cacheKey] {
+		routeSessionKey = sessionCacheKey(hubInstance.protocol.ID(), sessionID)
+		for client := range hubInstance.sessionClients[routeSessionKey] {
 			if _, connected := hubInstance.clients[client]; connected && !client.closed.Load() {
 				targetClients[client] = struct{}{}
 			}
@@ -195,14 +198,19 @@ func (hubInstance *Hub) forwardReverseRequest(object map[string]any, sessionID s
 	clientIdentifier := atomic.AddInt64(&hubInstance.nextID, 1)
 	object["id"] = clientIdentifier
 	routeKey := idKey(clientIdentifier)
+	raw := mustJSON(object)
 	hubInstance.reverseRequests[routeKey] = reverseRequestRoute{
-		identifier: identifier, agentGeneration: agentGeneration, clients: targetClients, permission: permission, interactionRequest: interactionRequest,
+		identifier: identifier, agentGeneration: agentGeneration, clients: targetClients,
+		permission: permission, sessionKey: routeSessionKey, payload: raw,
+		interactionRequest: interactionRequest,
+	}
+	sendClients := make([]*clientConnection, 0, len(targetClients))
+	for client := range targetClients {
+		sendClients = append(sendClients, client)
 	}
 	hubInstance.stateMutex.Unlock()
-
-	raw := mustJSON(object)
 	successfulSends := 0
-	for client := range targetClients {
+	for _, client := range sendClients {
 		if operationError := client.send(raw); operationError != nil {
 			hubInstance.removeClient(client)
 			continue

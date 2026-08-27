@@ -260,6 +260,69 @@ func TestReversePermissionRoutesOnlyToSubscribedSessionClient(testInstance *test
 	}
 }
 
+func TestReversePermissionSurvivesClientDisconnectAndReplaysAfterReconnect(testInstance *testing.T) {
+	agent := newFakeAgent(testInstance)
+	hubInstance := newTestHub(agent.websocketURL(), testInstance.TempDir(), nil)
+	defer hubInstance.Close()
+	firstClient, closeFirstClient := connectHubClient(testInstance, hubInstance)
+	hubInstance.stateMutex.Lock()
+	var firstServerClient *clientConnection
+	for connectedClient := range hubInstance.clients {
+		firstServerClient = connectedClient
+	}
+	hubInstance.subscribeSessionClientLocked(firstServerClient, "test", "durable-session")
+	hubInstance.stateMutex.Unlock()
+
+	agent.send(testInstance, map[string]any{"jsonrpc": "2.0", "id": "durable-permission", "method": "session/request_permission", "params": map[string]any{
+		"sessionId": "durable-session",
+		"options":   []any{map[string]any{"optionId": "approve_once"}},
+	}})
+	firstRequest := readMethod(testInstance, firstClient, "session/request_permission")
+	firstIdentifier, valid := numericID(firstRequest["id"])
+	if !valid {
+		testInstance.Fatalf("first permission id = %#v", firstRequest)
+	}
+	closeFirstClient()
+	waitForTestCondition(testInstance, "first client removal", func() bool {
+		hubInstance.stateMutex.Lock()
+		defer hubInstance.stateMutex.Unlock()
+		return len(hubInstance.clients) == 0
+	})
+	select {
+	case unexpected := <-agent.messages:
+		if unexpected["method"] == nil && idKey(unexpected["id"]) == idKey("durable-permission") {
+			testInstance.Fatalf("disconnect cancelled permission: %#v", unexpected)
+		}
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	secondClient, closeSecondClient := connectHubClient(testInstance, hubInstance)
+	defer closeSecondClient()
+	hubInstance.stateMutex.Lock()
+	var secondServerClient *clientConnection
+	for connectedClient := range hubInstance.clients {
+		secondServerClient = connectedClient
+	}
+	hubInstance.subscribeSessionClientLocked(secondServerClient, "test", "durable-session")
+	hubInstance.stateMutex.Unlock()
+	secondRequest := readMethod(testInstance, secondClient, "session/request_permission")
+	secondIdentifier, valid := numericID(secondRequest["id"])
+	if !valid || secondIdentifier != firstIdentifier {
+		testInstance.Fatalf("replayed permission = %#v", secondRequest)
+	}
+	if operationError := secondClient.WriteJSON(map[string]any{
+		"jsonrpc": "2.0", "id": secondIdentifier,
+		"result": map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": "approve_once"}},
+	}); operationError != nil {
+		testInstance.Fatal(operationError)
+	}
+	response := readAgentResponse(testInstance, agent, "durable-permission")
+	outcome, _ := rpcResult(testInstance, response)["outcome"].(map[string]any)
+	if outcome["outcome"] != "selected" || outcome["optionId"] != "approve_once" {
+		testInstance.Fatalf("replayed permission result = %#v", response)
+	}
+}
+
 func TestReversePermissionWithoutMatchingClientCancels(testInstance *testing.T) {
 	agent := newFakeAgent(testInstance)
 	hubInstance := newTestHub(agent.websocketURL(), testInstance.TempDir(), nil)
