@@ -63,6 +63,7 @@ func decodeDocument(data []byte, home string) (Document, error) {
 	if document.Version != DocumentVersion {
 		return document, fmt.Errorf("unsupported config version %d", document.Version)
 	}
+	document = NormalizeDocument(document, home)
 	return document, ValidateDocument(document)
 }
 

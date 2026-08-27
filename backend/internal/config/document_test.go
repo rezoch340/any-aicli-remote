@@ -131,12 +131,19 @@ func TestHubDocumentIncludesNotificationAndReverseReadDefaults(testingContext *t
 	}
 }
 
-func TestNormalizeDocumentAddsAgentMessageLimitToExistingConfig(testingContext *testing.T) {
-	document := DefaultDocument(testingContext.TempDir())
+func TestDecodeDocumentAddsAgentMessageLimitToExistingConfig(testingContext *testing.T) {
+	home := testingContext.TempDir()
+	document := DefaultDocument(home)
 	document.Tuning.Hub.AgentMaxMessageBytes = 0
+	encoded, operationError := json.Marshal(document)
+	if operationError != nil {
+		testingContext.Fatal(operationError)
+	}
 
-	normalized := NormalizeDocument(document, testingContext.TempDir())
-
+	normalized, operationError := DecodeDocumentReader(bytes.NewReader(encoded), home)
+	if operationError != nil {
+		testingContext.Fatal(operationError)
+	}
 	if normalized.Tuning.Hub.AgentMaxMessageBytes != 64<<20 {
 		testingContext.Fatalf("agent max message bytes = %d", normalized.Tuning.Hub.AgentMaxMessageBytes)
 	}
