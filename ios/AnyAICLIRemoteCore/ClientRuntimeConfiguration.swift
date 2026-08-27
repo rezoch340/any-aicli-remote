@@ -7,6 +7,7 @@ public struct ClientRuntimeConfiguration: Equatable, Sendable {
     public let sessionCreateTimeout: TimeInterval
     public let healthRequestTimeout: TimeInterval
     public let healthPollingInterval: TimeInterval
+    public let webSocketMaximumMessageBytes: Int
 
     public init(
         initializeTimeout: TimeInterval = 20,
@@ -14,7 +15,8 @@ public struct ClientRuntimeConfiguration: Equatable, Sendable {
         sessionLoadTimeout: TimeInterval = 90,
         sessionCreateTimeout: TimeInterval = 60,
         healthRequestTimeout: TimeInterval = 3,
-        healthPollingInterval: TimeInterval = 5
+        healthPollingInterval: TimeInterval = 5,
+        webSocketMaximumMessageBytes: Int = 64 << 20
     ) {
         self.initializeTimeout = initializeTimeout
         self.rpcTimeout = rpcTimeout
@@ -22,5 +24,6 @@ public struct ClientRuntimeConfiguration: Equatable, Sendable {
         self.sessionCreateTimeout = sessionCreateTimeout
         self.healthRequestTimeout = healthRequestTimeout
         self.healthPollingInterval = healthPollingInterval
+        self.webSocketMaximumMessageBytes = webSocketMaximumMessageBytes
     }
 }

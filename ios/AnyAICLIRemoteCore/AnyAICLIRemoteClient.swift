@@ -24,6 +24,7 @@ public final class AnyAICLIRemoteClient {
 
     let request = try Self.websocketRequest(baseURL: profile.baseURL, key: profile.key)
     let task = URLSession.shared.webSocketTask(with: request)
+    task.maximumMessageSize = runtimeConfiguration.webSocketMaximumMessageBytes
     let connectionID = UUID()
     self.connectionID = connectionID
     socket = task

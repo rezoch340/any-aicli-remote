@@ -10,12 +10,14 @@ final class ClientRuntimeConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.sessionCreateTimeout, 60)
         XCTAssertEqual(configuration.healthRequestTimeout, 3)
         XCTAssertEqual(configuration.healthPollingInterval, 5)
+        XCTAssertEqual(configuration.webSocketMaximumMessageBytes, 64 << 20)
     }
 
     func testCustomDurationsArePreserved() {
         let configuration = ClientRuntimeConfiguration(
             initializeTimeout: 11, rpcTimeout: 22, sessionLoadTimeout: 33,
-            sessionCreateTimeout: 44, healthRequestTimeout: 2, healthPollingInterval: 7
+            sessionCreateTimeout: 44, healthRequestTimeout: 2, healthPollingInterval: 7,
+            webSocketMaximumMessageBytes: 8 << 20
         )
         XCTAssertEqual(configuration.initializeTimeout, 11)
         XCTAssertEqual(configuration.rpcTimeout, 22)
@@ -23,5 +25,6 @@ final class ClientRuntimeConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.sessionCreateTimeout, 44)
         XCTAssertEqual(configuration.healthRequestTimeout, 2)
         XCTAssertEqual(configuration.healthPollingInterval, 7)
+        XCTAssertEqual(configuration.webSocketMaximumMessageBytes, 8 << 20)
     }
 }
